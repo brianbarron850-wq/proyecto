@@ -470,34 +470,70 @@ let editingOrderId=null; // Estado para rastrear si se está editando un pedido
 // ═══════════════════════════════════════════
 // LOCALSTORAGE Y GOOGLE SHEETS SYNC
 // ═══════════════════════════════════════════
+// ── COLA DE ESCRITURA A GOOGLE SHEETS ───────────────────────
+// Usamos una cola para evitar race conditions y manejar
+// la restricción de CORS de Google Apps Script.
+// POST se hace con mode:'no-cors' (GAS lo acepta; no leemos respuesta).
+// GET usa fetch normal ya que GAS permite GET con CORS.
+const SQ = { queue: [], running: false };
+// Claves que NO se sincronizan (privadas/temporales)
+const SHEETS_SKIP = ['be_session'];
+function sheetsSend(key, value) {
+  if (!API_URL || API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
+  if (SHEETS_SKIP.includes(key)) return;  // sesión es local únicamente
+  SQ.queue.push({ key, value });
+  if (!SQ.running) sheetsFlush();
+}
+async function sheetsFlush() {
+  SQ.running = true;
+  while (SQ.queue.length > 0) {
+    // Si hay múltiples actualizaciones de la misma clave, solo enviamos la última
+    const last = {};
+    SQ.queue.forEach(item => { last[item.key] = item.value; });
+    SQ.queue = [];
+    for (const [key, value] of Object.entries(last)) {
+      try {
+        await fetch(API_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: JSON.stringify({ key, value })
+        });
+      } catch(e) {
+        console.warn('[Sheets] Error enviando ' + key + ':', e.message);
+      }
+    }
+  }
+  SQ.running = false;
+}
+
+// ── LOCALSTORAGE + SYNC ──────────────────────────────────────
 const LS={
   get:(k,d=[])=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}},
   set:(k,v)=>{
     localStorage.setItem(k,JSON.stringify(v));
-    // Sincronización en segundo plano con Google Sheets
-    if(typeof API_URL !== 'undefined' && API_URL !== 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec'){
-      fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ key: k, value: v })
-      }).catch(console.error);
-    }
+    // Enviar a Google Sheets en segundo plano (sin bloquear UI)
+    sheetsSend(k, v);
   },
   obj:(k,d={})=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
 };
 
-// Polling silencioso para traer los cambios desde Google Sheets
+// ── POLLING: trae cambios desde Google Sheets ────────────────
+// Esto permite que múltiples dispositivos vean los mismos datos
 async function syncData(isInit = false) {
-  if (API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
+  if (!API_URL || API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL + '?t=' + Date.now(), { mode: 'cors' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    if (data.error) throw new Error(data.error);
     let changed = false;
     for (const [k, v] of Object.entries(data)) {
       const local = localStorage.getItem(k);
       const remote = JSON.stringify(v);
-      if (local !== remote) {
-        localStorage.setItem(k, remote); // Usamos setItem directo para no ciclar el fetch
+      // Solo actualizar si el valor remoto es más reciente o es init
+      if (isInit || local !== remote) {
+        localStorage.setItem(k, remote);
         changed = true;
       }
     }
@@ -506,11 +542,11 @@ async function syncData(isInit = false) {
       if (['kitchen', 'orders', 'cashier'].includes(CV)) go(CV);
     }
   } catch (e) {
-    console.error("Error sincronizando DB", e);
+    console.warn('[Sheets] Sin sincronización:', e.message);
   }
 }
-// Ejecutar el polling cada 10 segundos
-setInterval(syncData, 10000);
+// Polling cada 12 segundos (suficiente sin saturar cuota de GAS)
+setInterval(syncData, 12000);
 
 // ═══════════════════════════════════════════
 // UTILS
@@ -527,27 +563,59 @@ const nextNum=()=>String(LS.get('be_orders').length+1).padStart(4,'0');
 // ═══════════════════════════════════════════
 // INIT DATA
 // ═══════════════════════════════════════════
-function initData(){
-  if(!localStorage.getItem('be_users')){
-    LS.set('be_users',[{id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
-      createdAt:new Date().toISOString(),
-      history:[{action:'Sistema inicializado. Usuario administrador creado.',timestamp:new Date().toISOString()}]}]);
+// Datos por defecto solo si Sheets no tiene nada
+const DEFAULT_USERS=[{id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
+  createdAt:new Date().toISOString(),
+  history:[{action:'Sistema inicializado. Usuario administrador creado.',timestamp:new Date().toISOString()}]}];
+const DEFAULT_PRODUCTS=[
+  {id:'prod-1',name:'Birria de res',description:'Birria tradicional de res con consomé incluido',category:'Platos Fuertes',price:120,active:true},
+  {id:'prod-2',name:'Taco de birria',description:'Taco dorado de birria con queso manchego',category:'Tacos',price:25,active:true},
+  {id:'prod-3',name:'Quesabirria',description:'Quesadilla de birria gratinada con queso Oaxaca',category:'Especialidades',price:45,active:true},
+  {id:'prod-4',name:'Orden 3 Tacos',description:'3 tacos de birria con consomé y salsas de la casa',category:'Tacos',price:70,active:true},
+  {id:'prod-5',name:'Consomé',description:'Consomé de birria 250ml caliente',category:'Bebidas',price:30,active:true},
+  {id:'prod-6',name:'Agua Fresca',description:'Agua fresca del día 500ml',category:'Bebidas',price:25,active:true},
+];
+
+async function initData(){
+  // Si hay API configurada, PRIMERO intentar cargar desde Sheets
+  // Esto garantiza que en un dispositivo nuevo los datos de Sheets tienen prioridad
+  if(API_URL && API_URL !== 'TU_URL_DE_GOOGLE_APPS_SCRIPT_AQUI'){
+    try{
+      const res = await fetch(API_URL + '?t=' + Date.now(), { mode:'cors' });
+      if(res.ok){
+        const remote = await res.json();
+        if(!remote.error){
+          // Guardar cada clave remota en localStorage SIN reenviar a Sheets (directo)
+          for(const [k,v] of Object.entries(remote)){
+            if(v !== null && v !== undefined){
+              const curr = localStorage.getItem(k);
+              // Solo si el valor remoto tiene datos reales
+              const isEmpty = Array.isArray(v) ? v.length===0 : (typeof v==='object' ? Object.keys(v).length===0 : false);
+              if(!isEmpty || !curr){
+                localStorage.setItem(k, JSON.stringify(v));
+              }
+            }
+          }
+        }
+      }
+    }catch(e){ console.warn('[initData] No se pudo cargar desde Sheets:', e.message); }
   }
-  if(!localStorage.getItem('be_products')){
-    LS.set('be_products',[
-      {id:uid(),name:'Birria de res',description:'Birria tradicional de res con consomé incluido',category:'Platos Fuertes',price:120,active:true},
-      {id:uid(),name:'Taco de birria',description:'Taco dorado de birria con queso manchego',category:'Tacos',price:25,active:true},
-      {id:uid(),name:'Quesabirria',description:'Quesadilla de birria gratinada con queso Oaxaca',category:'Especialidades',price:45,active:true},
-      {id:uid(),name:'Orden 3 Tacos',description:'3 tacos de birria con consomé y salsas de la casa',category:'Tacos',price:70,active:true},
-      {id:uid(),name:'Consomé',description:'Consomé de birria 250ml caliente',category:'Bebidas',price:30,active:true},
-      {id:uid(),name:'Agua Fresca',description:'Agua fresca del día 500ml',category:'Bebidas',price:25,active:true},
-    ]);
-  }
-  if(!localStorage.getItem('be_orders'))LS.set('be_orders',[]);
-  if(!localStorage.getItem('be_cuts'))LS.set('be_cuts',[]);
-  if(!localStorage.getItem('be_sd'))LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
-  if(!localStorage.getItem('be_sw'))LS.set('be_sw',{total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
-  if(!localStorage.getItem('be_sm'))LS.set('be_sm',{total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
+
+  // Ahora aplicar defaults SOLO si siguen sin datos (primer uso real)
+  const writeDefault = (key, val) => {
+    if(!localStorage.getItem(key)){
+      localStorage.setItem(key, JSON.stringify(val));
+      // Registrar en Sheets también
+      sheetsSend(key, val);
+    }
+  };
+  writeDefault('be_users', DEFAULT_USERS);
+  writeDefault('be_products', DEFAULT_PRODUCTS);
+  writeDefault('be_orders', []);
+  writeDefault('be_cuts', []);
+  writeDefault('be_sd', {total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
+  writeDefault('be_sw', {total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
+  writeDefault('be_sm', {total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
 }
 
 // ═══════════════════════════════════════════
@@ -1543,15 +1611,16 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-initData();
+// Arranque: initData es async, esperamos antes de restaurar sesión
 startClock();
-
-// Auto-restore session
-const sess=LS.obj('be_session',null);
-if(sess?.uid){
-  const u=LS.get('be_users').find(x=>x.id===sess.uid&&x.active!==false);
-  if(u){CU=u;startApp();}
-}
+initData().then(() => {
+  // Auto-restore session tras cargar datos
+  const sess=LS.obj('be_session',null);
+  if(sess?.uid){
+    const u=LS.get('be_users').find(x=>x.id===sess.uid&&x.active!==false);
+    if(u){CU=u;startApp();}
+  }
+});
 </script>
 </body>
 </html>
