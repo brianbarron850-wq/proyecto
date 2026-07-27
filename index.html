@@ -3,300 +3,232 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Gestión Integral</title>
+    <title>Sistema POS - Birriería</title>
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            margin: 0; 
-            padding: 20px; 
-            background-color: #f0f2f5; 
-            color: #333; 
+        /* Estilos generales */
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; }
+        
+        /* Contenedor de Login */
+        #contenedor-login {
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            height: 100vh; background-color: #ffffff;
         }
-        .container { 
-            max-width: 900px; 
-            margin: auto; 
+        #contenedor-login input { margin: 10px 0; padding: 10px; width: 250px; font-size: 16px; }
+        
+        /* Contenedor Principal (oculto al inicio) */
+        #contenedor-app { display: none; }
+        
+        /* Barra de navegación */
+        nav { background: #800000; padding: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+        nav button { 
+            padding: 10px 15px; background: #fff; color: #800000; border: none; 
+            border-radius: 5px; cursor: pointer; font-weight: bold;
         }
-        h1 { 
-            text-align: center; 
-            color: #1a252f; 
-        }
-        section { 
-            background: #ffffff; 
-            padding: 25px; 
-            margin-bottom: 25px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
-        }
-        h2 { 
-            color: #2c3e50; 
-            border-bottom: 2px solid #ecf0f1; 
-            padding-bottom: 10px; 
-            margin-top: 0; 
-        }
-        .form-group { 
-            margin-bottom: 15px; 
-        }
-        label { 
-            display: block; 
-            margin-bottom: 5px; 
-            font-weight: 600; 
-            color: #555;
-        }
-        input, select { 
-            width: 100%; 
-            padding: 12px; 
-            border: 1px solid #dcdde1; 
-            border-radius: 6px; 
-            box-sizing: border-box; 
-            font-size: 14px;
-        }
-        input:focus, select:focus {
-            border-color: #3498db;
-            outline: none;
-        }
-        .btn-group { 
-            display: flex; 
-            gap: 12px; 
-            margin-top: 20px; 
-        }
-        button { 
-            flex: 1; 
-            padding: 12px; 
-            border: none; 
-            border-radius: 6px; 
-            font-size: 16px; 
-            font-weight: bold;
-            cursor: pointer; 
-            transition: background 0.3s ease; 
-            color: white; 
-        }
-        .btn-save { background-color: #27ae60; }
-        .btn-save:hover { background-color: #219150; }
-        .btn-load { background-color: #2980b9; }
-        .btn-load:hover { background-color: #2471a3; }
-        pre { 
-            background: #2c3e50; 
-            color: #ecf0f1; 
-            padding: 15px; 
-            border-radius: 6px; 
-            overflow-x: auto; 
-            max-height: 350px; 
-            margin-top: 15px;
-        }
+        nav button:hover { background: #e0e0e0; }
+        
+        /* Módulos */
+        .modulo { display: none; padding: 20px; }
+        .modulo-activo { display: block; } /* Clase para mostrar el módulo */
+        
+        /* Tablas */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #fff;}
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #800000; color: white; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Control de Base de Datos - Google Sheets</h1>
 
-        <!-- SECCIÓN USUARIOS -->
-        <section id="seccionUsuarios">
-            <h2>Gestión de Usuarios</h2>
-            <div class="form-group">
-                <label for="nombreUsuario">Nombre de Usuario</label>
-                <input type="text" id="nombreUsuario" placeholder="Ej. Carlos">
-            </div>
-            <div class="form-group">
-                <label for="rolUsuario">Rol en el Sistema</label>
-                <select id="rolUsuario">
-                    <option value="Admin">Admin</option>
-                    <option value="Mesero">Mesero</option>
-                    <option value="Cocina">Cocina</option>
-                    <option value="Cajero">Cajero</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="passUsuario">Contraseña</label>
-                <input type="password" id="passUsuario" placeholder="Ingrese contraseña">
-            </div>
-            <div class="btn-group">
-                <button class="btn-save" onclick="guardarUsuario()">Guardar Usuario</button>
-                <button class="btn-load" onclick="cargarDatos('obtenerUsuarios', 'resultadoUsuarios')">Cargar Usuarios</button>
-            </div>
-            <pre id="resultadoUsuarios">Esperando consulta...</pre>
-        </section>
-
-        <!-- SECCIÓN PEDIDOS -->
-        <section id="seccionPedidos">
-            <h2>Gestión de Pedidos</h2>
-            <div class="form-group">
-                <label for="idPedido">ID de Pedido</label>
-                <input type="text" id="idPedido" placeholder="Ej. PED-001">
-            </div>
-            <div class="form-group">
-                <label for="usuarioPedido">Atendido Por</label>
-                <input type="text" id="usuarioPedido" placeholder="Nombre del empleado">
-            </div>
-            <div class="form-group">
-                <label for="detallesPedido">Detalles del Pedido</label>
-                <input type="text" id="detallesPedido" placeholder="Ej. 2 Tacos, 1 Refresco">
-            </div>
-            <div class="form-group">
-                <label for="totalPedido">Total a Pagar ($)</label>
-                <input type="number" id="totalPedido" placeholder="0.00" step="0.01">
-            </div>
-            <div class="btn-group">
-                <button class="btn-save" onclick="guardarPedido()">Guardar Pedido</button>
-                <button class="btn-load" onclick="cargarDatos('obtenerPedidos', 'resultadoPedidos')">Cargar Pedidos</button>
-            </div>
-            <pre id="resultadoPedidos">Esperando consulta...</pre>
-        </section>
-
-        <!-- SECCIÓN CORTES -->
-        <section id="seccionCortes">
-            <h2>Gestión de Cortes de Caja</h2>
-            <div class="form-group">
-                <label for="idCorte">ID de Corte</label>
-                <input type="text" id="idCorte" placeholder="Ej. COR-001">
-            </div>
-            <div class="form-group">
-                <label for="usuarioCorte">Cajero Responsable</label>
-                <input type="text" id="usuarioCorte" placeholder="Nombre del cajero">
-            </div>
-            <div class="form-group">
-                <label for="totalVentasCorte">Total Vendido ($)</label>
-                <input type="number" id="totalVentasCorte" placeholder="0.00" step="0.01">
-            </div>
-            <div class="btn-group">
-                <button class="btn-save" onclick="guardarCorte()">Guardar Corte</button>
-                <button class="btn-load" onclick="cargarDatos('obtenerCortes', 'resultadoCortes')">Cargar Cortes</button>
-            </div>
-            <pre id="resultadoCortes">Esperando consulta...</pre>
-        </section>
+    <!-- ================= VISTA DE INICIO DE SESIÓN ================= -->
+    <div id="contenedor-login">
+        <h2>Ingreso al Sistema</h2>
+        <input type="text" id="usuario" placeholder="Usuario">
+        <input type="password" id="password" placeholder="Contraseña">
+        <button onclick="iniciarSesion()" style="padding: 10px 20px; font-size: 16px; background: #800000; color: white; border: none; cursor: pointer;">Entrar</button>
     </div>
 
+    <!-- ================= APLICACIÓN PRINCIPAL ================= -->
+    <div id="contenedor-app">
+        <!-- Navegación -->
+        <nav>
+            <button onclick="mostrarModulo('modulo-pedidos')">Pedidos</button>
+            <button onclick="mostrarModulo('modulo-cocina')">Cocina</button>
+            <button onclick="mostrarModulo('modulo-caja')">Caja</button>
+            <button onclick="mostrarModulo('modulo-productos')">Productos</button>
+            <button onclick="mostrarModulo('modulo-usuarios')">Usuarios</button>
+            <button onclick="cerrarSesion()" style="margin-left: auto; background: #dc3545; color: white;">Cerrar Sesión</button>
+        </nav>
+
+        <!-- 1. Módulo: Pedidos -->
+        <div id="modulo-pedidos" class="modulo">
+            <h2>Módulo de Pedidos</h2>
+            <input type="text" id="cliente-pedido" placeholder="Nombre del cliente" style="padding: 8px;">
+            <input type="number" id="total-pedido" placeholder="Total $" style="padding: 8px;">
+            <button onclick="guardarPedido()" style="padding: 8px; cursor:pointer;">Registrar Orden</button>
+        </div>
+
+        <!-- 2. Módulo: Cocina -->
+        <div id="modulo-cocina" class="modulo">
+            <h2>Módulo de Cocina</h2>
+            <p>Aquí se visualizarán las comandas pendientes.</p>
+        </div>
+
+        <!-- 3. Módulo: Caja (Aquí se ven los registros y se hace el corte) -->
+        <div id="modulo-caja" class="modulo">
+            <h2>Módulo de Caja</h2>
+            <button onclick="realizarCorte()" style="padding: 10px; background: #28a745; color: white; border: none; cursor: pointer;">Realizar Corte de Caja</button>
+            <button onclick="sincronizarRegistros()" style="padding: 10px; margin-left:10px; cursor:pointer;">Sincronizar Datos</button>
+            
+            <h3>Ventas Registradas</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-registros">
+                    <!-- Los registros se inyectarán aquí -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 4. Módulo: Productos -->
+        <div id="modulo-productos" class="modulo">
+            <h2>Módulo de Productos</h2>
+            <p>Gestión del inventario y menú.</p>
+        </div>
+
+        <!-- 5. Módulo: Usuarios (Ya no se cruza con caja) -->
+        <div id="modulo-usuarios" class="modulo">
+            <h2>Módulo de Usuarios</h2>
+            <p>Gestión de cuentas y accesos del personal.</p>
+        </div>
+    </div>
+
+    <!-- ================= LÓGICA JAVASCRIPT ================= -->
     <script>
-        // ⚠️ IMPORTANTE: Pega aquí la URL de tu implementación web de Apps Script
-        const URL_API = "https://script.google.com/macros/s/TU_SCRIPT_ID/exec";
+        // PEGA AQUÍ TU URL GENERADA AL IMPLEMENTAR EN GOOGLE APPS SCRIPT
+        const URL_WEB_APP = "https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec"; 
 
-        // --- FUNCIONES PARA RECOPILAR Y GUARDAR DATOS --- //
-
-        function guardarUsuario() {
-            const nombre = document.getElementById("nombreUsuario").value.trim();
-            const rol = document.getElementById("rolUsuario").value;
-            const password = document.getElementById("passUsuario").value.trim();
-
-            if (!nombre || !password) {
-                alert("Por favor, completa el nombre y la contraseña.");
-                return;
-            }
-
-            const datos = { 
-                action: "guardarUsuario", 
-                nombre: nombre, 
-                rol: rol, 
-                password: password 
-            };
-            enviarDatos(datos, "Usuarios");
+        /* --- CONTROL DE VISTAS Y NAVEGACIÓN --- */
+        function iniciarSesion() {
+            // Oculta por completo la vista de login para que no estorbe
+            document.getElementById('contenedor-login').style.display = 'none';
+            // Muestra la aplicación
+            document.getElementById('contenedor-app').style.display = 'block';
+            
+            // Mostrar pedidos por defecto y cargar la base de datos
+            mostrarModulo('modulo-pedidos');
+            sincronizarRegistros();
         }
 
-        function guardarPedido() {
-            const id = document.getElementById("idPedido").value.trim();
-            const usuario = document.getElementById("usuarioPedido").value.trim();
-            const detalles = document.getElementById("detallesPedido").value.trim();
-            const total = document.getElementById("totalPedido").value;
-
-            if (!id || !usuario || !detalles || !total) {
-                alert("Por favor, completa todos los campos del pedido.");
-                return;
-            }
-
-            const datos = {
-                action: "guardarPedido",
-                id: id,
-                usuario: usuario,
-                detalles: detalles,
-                total: parseFloat(total),
-                estado: "Activo",
-                fecha: new Date().toLocaleString()
-            };
-            enviarDatos(datos, "Pedidos");
+        function cerrarSesion() {
+            document.getElementById('contenedor-app').style.display = 'none';
+            document.getElementById('contenedor-login').style.display = 'flex';
         }
 
-        function guardarCorte() {
-            const idCorte = document.getElementById("idCorte").value.trim();
-            const usuario = document.getElementById("usuarioCorte").value.trim();
-            const totalVentas = document.getElementById("totalVentasCorte").value;
-
-            if (!idCorte || !usuario || !totalVentas) {
-                alert("Por favor, completa todos los campos del corte.");
-                return;
-            }
-
-            const datos = {
-                action: "guardarCorte",
-                idCorte: idCorte,
-                usuario: usuario,
-                totalVentas: parseFloat(totalVentas),
-                fecha: new Date().toLocaleString()
-            };
-            enviarDatos(datos, "Cortes");
-        }
-
-        // --- FUNCIÓN CENTRAL DE ENVÍO (POST) --- //
-
-        function enviarDatos(datos, tipoFormulario) {
-            // El 'Content-Type': 'text/plain' es un truco técnico vital para 
-            // evitar bloqueos de CORS (preflight CORS errors) al solicitar a Apps Script.
-            fetch(URL_API, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "text/plain;charset=utf-8"
-                },
-                body: JSON.stringify(datos)
-            })
-            .then(response => response.json())
-            .then(respuesta => {
-                if (respuesta.status === "success") {
-                    alert(`¡Registro guardado con éxito en la hoja de ${tipoFormulario}!`);
-                    limpiarFormulario(tipoFormulario);
-                } else {
-                    alert(`Error del servidor: ${respuesta.message}`);
+        function mostrarModulo(idModuloDeseado) {
+            // Lista de todos los IDs de los módulos
+            const modulos = ['modulo-pedidos', 'modulo-cocina', 'modulo-caja', 'modulo-productos', 'modulo-usuarios'];
+            
+            // Apagar todos
+            modulos.forEach(id => {
+                let elemento = document.getElementById(id);
+                if (elemento) {
+                    elemento.style.display = 'none';
                 }
-            })
-            .catch(error => {
-                console.error("Error en la petición POST:", error);
-                alert("Hubo un error de conexión al guardar los datos. Asegúrate de haber desplegado correctamente el script y pegado la URL.");
             });
+
+            // Encender solo el solicitado
+            let moduloActivar = document.getElementById(idModuloDeseado);
+            if (moduloActivar) {
+                moduloActivar.style.display = 'block';
+            }
         }
 
-        // --- FUNCIÓN CENTRAL DE CARGA (GET) --- //
-
-        function cargarDatos(accion, idElementoDestino) {
-            const elDestino = document.getElementById(idElementoDestino);
-            elDestino.textContent = "Cargando datos desde Google Sheets...";
-
-            fetch(`${URL_API}?action=${accion}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.length === 0) {
-                    elDestino.textContent = "No hay registros disponibles en esta hoja.";
-                } else {
-                    elDestino.textContent = JSON.stringify(data, null, 2);
-                }
-            })
-            .catch(error => {
-                console.error("Error al obtener datos GET:", error);
-                elDestino.textContent = "Error al intentar descargar los registros. Verifica que la URL del script sea correcta y esté implementada como 'Cualquier usuario'.";
-            });
-        }
-
-        // --- FUNCIÓN PARA LIMPIAR INPUTS TRAS GUARDAR --- //
+        /* --- COMUNICACIÓN CON LA BASE DE DATOS (GOOGLE SHEETS) --- */
         
-        function limpiarFormulario(tipoFormulario) {
-            if (tipoFormulario === "Usuarios") {
-                document.getElementById("nombreUsuario").value = "";
-                document.getElementById("passUsuario").value = "";
-                document.getElementById("rolUsuario").selectedIndex = 0;
-            } else if (tipoFormulario === "Pedidos") {
-                document.getElementById("idPedido").value = "";
-                document.getElementById("usuarioPedido").value = "";
-                document.getElementById("detallesPedido").value = "";
-                document.getElementById("totalPedido").value = "";
-            } else if (tipoFormulario === "Cortes") {
-                document.getElementById("idCorte").value = "";
-                document.getElementById("usuarioCorte").value = "";
-                document.getElementById("totalVentasCorte").value = "";
+        // 1. Guardar y llenar la base de datos
+        function guardarPedido() {
+            let cliente = document.getElementById('cliente-pedido').value;
+            let total = document.getElementById('total-pedido').value;
+            let fecha = new Date().toLocaleString();
+
+            if(!cliente || !total) {
+                alert("Por favor completa los campos del pedido.");
+                return;
+            }
+
+            // Petición al backend
+            fetch(URL_WEB_APP, {
+                method: 'POST',
+                body: JSON.stringify({
+                    accion: "insertar",
+                    hoja: "Ventas", // Tu pestaña en Sheets debe llamarse "Ventas"
+                    datos: [fecha, cliente, total]
+                })
+            })
+            .then(res => res.json())
+            .then(respuesta => {
+                if(respuesta.estatus === "exito") {
+                    alert("¡Registro guardado!");
+                    document.getElementById('cliente-pedido').value = '';
+                    document.getElementById('total-pedido').value = '';
+                    sincronizarRegistros(); // Refrescar la tabla
+                }
+            })
+            .catch(error => alert("Error de conexión al guardar: " + error));
+        }
+
+        // 2. Sincronizar y mostrar registros que ya existen
+        function sincronizarRegistros() {
+            fetch(URL_WEB_APP, {
+                method: 'POST',
+                body: JSON.stringify({
+                    accion: "obtener",
+                    hoja: "Ventas"
+                })
+            })
+            .then(res => res.json())
+            .then(respuesta => {
+                if(respuesta.estatus === "exito") {
+                    let cuerpoTabla = document.getElementById('tabla-registros');
+                    cuerpoTabla.innerHTML = ''; // Limpiar antes de llenar
+                    
+                    let datos = respuesta.datos;
+                    // Empezamos desde i=1 para saltarnos los encabezados de la fila 1 en Sheets
+                    for(let i = 1; i < datos.length; i++) {
+                        let fila = document.createElement('tr');
+                        fila.innerHTML = `
+                            <td>${datos[i][0]}</td>
+                            <td>${datos[i][1]}</td>
+                            <td>$${datos[i][2]}</td>
+                        `;
+                        cuerpoTabla.appendChild(fila);
+                    }
+                }
+            })
+            .catch(error => console.error("Error sincronizando base de datos:", error));
+        }
+
+        // 3. Ejecutar Corte de Caja
+        function realizarCorte() {
+            if(confirm("¿Estás seguro de que deseas realizar el corte de caja?")) {
+                fetch(URL_WEB_APP, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        accion: "corte_caja",
+                        hoja: "Ventas"
+                    })
+                })
+                .then(res => res.json())
+                .then(respuesta => {
+                    if(respuesta.estatus === "exito") {
+                        alert(respuesta.mensaje + "\nTotal calculado: $" + respuesta.total);
+                    }
+                })
+                .catch(error => alert("Error al procesar el corte: " + error));
             }
         }
     </script>
