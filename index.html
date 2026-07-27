@@ -475,7 +475,7 @@ const LS={
   set:(k,v)=>{
     localStorage.setItem(k,JSON.stringify(v));
     // Sincronización en segundo plano con Google Sheets
-    if(typeof API_URL !== 'undefined' && API_URL !== 'TU_URL_DE_GOOGLE_APPS_SCRIPT_AQUI'){
+    if(typeof API_URL !== 'undefined' && API_URL !== 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec'){
       fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
@@ -488,7 +488,7 @@ const LS={
 
 // Polling silencioso para traer los cambios desde Google Sheets
 async function syncData(isInit = false) {
-  if (API_URL === 'TU_URL_DE_GOOGLE_APPS_SCRIPT_AQUI') return;
+  if (API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
   try {
     const res = await fetch(API_URL);
     const data = await res.json();
@@ -549,7 +549,6 @@ function initData(){
   if(!localStorage.getItem('be_sw'))LS.set('be_sw',{total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
   if(!localStorage.getItem('be_sm'))LS.set('be_sm',{total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
 }
-initData(); // <-- Se manda llamar para crear el usuario admin por defecto
 
 // ═══════════════════════════════════════════
 // AUTH
@@ -790,7 +789,7 @@ function buildCart(){
 }
 function buildMyOrders(){
   const orders=LS.get('be_orders');
-  const mine=orders.filter(o=>o.workerId===CU.id&&!['paid', 'cancelled'].includes(o.status)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+  const mine=orders.filter(o=>o.workerId===CU.id&&!['paid'].includes(o.status)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
   if(!mine.length)return'<div class="empty" style="padding:16px 0"><p>Sin pedidos activos</p></div>';
   return mine.map(o=>`
     <div class="cord" style="cursor:default">
@@ -802,7 +801,6 @@ function buildMyOrders(){
       <div style="margin-top:8px;display:flex;gap:6px">
         ${o.status==='bar'?`<button class="btn bpu btn-sm" onclick="markDel('${o.id}')">🍽️ Marcar Entregado</button>`:''}
         <button class="btn bo btn-sm" onclick="editOrder('${o.id}')">✏️ Editar</button>
-        <button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
       </div>
     </div>`).join('');
 }
@@ -883,18 +881,6 @@ function markDel(oid){
   go('orders');
 }
 
-function cancelOrder(oid){
-  confirm2('¿Cancelar pedido?','Este pedido se marcará como cancelado y no se podrá recuperar.',()=>{
-    const orders=LS.get('be_orders');
-    const i=orders.findIndex(o=>o.id===oid);if(i===-1)return;
-    orders[i].status='cancelled';LS.set('be_orders',orders);
-    logAct(CU.id,`Canceló pedido #${orders[i].number}`);
-    notify('🚫','Pedido cancelado',`Pedido #${orders[i].number} cancelado.`,3000);
-    if(CV==='orders'||CV==='kitchen')go(CV);
-    updBadges();
-  },'Cancelar Pedido','bd');
-}
-
 // ═══════════════════════════════════════════
 // KITCHEN VIEW
 // ═══════════════════════════════════════════
@@ -942,7 +928,6 @@ function buildKCard(o){
     <div class="ocf"><div class="sbts">
       ${btns[o.status]||''}
       ${!['pending','paid','delivered'].includes(o.status)?`<button class="btn bo btn-sm" onclick="updStatus('${o.id}','pending')">⏪ Regresar</button>`:''}
-      ${['pending','in-process'].includes(o.status)?`<button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>`:''}
       ${['delivered','paid'].includes(o.status)?`<span style="font-size:12px;color:var(--muted)">Pedido completado</span>`:''}
     </div></div>
   </div>`;
@@ -1455,3 +1440,97 @@ function rUsers(c){
           ${u.id!==CU?.id?`<button class="btn bd btn-sm" onclick="delUser('${u.id}')">🗑️</button>`:''}
         </div></td>
       </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+function openUser(uid_){
+  document.getElementById('ue-id').value=uid_||'';
+  if(uid_){
+    const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
+    document.getElementById('mt-user').textContent='Editar Usuario';
+    document.getElementById('ue-name').value=u.name;
+    document.getElementById('ue-pass').value='';
+    document.getElementById('ue-role').value=u.role;
+  }else{
+    document.getElementById('mt-user').textContent='Nuevo Usuario';
+    ['ue-name','ue-pass'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('ue-role').value='waiter';
+  }
+  om('m-user');
+}
+function saveUser(){
+  const name=document.getElementById('ue-name').value.trim();
+  const pass=document.getElementById('ue-pass').value;
+  const role=document.getElementById('ue-role').value;
+  const eid=document.getElementById('ue-id').value;
+  if(!name||!role){notify('⚠️','Campos requeridos','El nombre y rol son obligatorios.',3000);return}
+  const users=LS.get('be_users');
+  if(eid){
+    const i=users.findIndex(u=>u.id===eid);
+    if(i!==-1){users[i].name=name;users[i].role=role;if(pass)users[i].password=pass;
+      logAct(CU.id,`Editó usuario "${name}"`);}
+  }else{
+    if(!pass){notify('⚠️','Contraseña requerida','Por favor ingresa una contraseña.',3000);return}
+    if(users.find(u=>u.name.toLowerCase()===name.toLowerCase())){
+      notify('⚠️','Usuario existente',`Ya existe un usuario con el nombre "${name}".`,3000);return}
+    users.push({id:uid(),name,password:pass,role,active:true,createdAt:new Date().toISOString(),
+      history:[{action:`Usuario creado por ${CU.name}`,timestamp:new Date().toISOString()}]});
+    logAct(CU.id,`Creó usuario "${name}" (${ROLES[role]})`);
+  }
+  LS.set('be_users',users);cm('m-user');
+  notify('✅',eid?'Usuario actualizado':'Usuario creado',name,3000);go('users');
+}
+function togUser(uid_){
+  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes desactivar tu propio usuario.',3000);return}
+  const users=LS.get('be_users');const i=users.findIndex(u=>u.id===uid_);if(i===-1)return;
+  users[i].active=users[i].active===false?true:false;LS.set('be_users',users);
+  logAct(CU.id,`${users[i].active?'Activó':'Desactivó'} usuario "${users[i].name}"`);go('users');
+}
+function delUser(uid_){
+  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes eliminar tu propio usuario.',3000);return}
+  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
+  confirm2(`¿Eliminar a "${u.name}"?`,'Esta acción no se puede deshacer.',()=>{
+    LS.set('be_users',LS.get('be_users').filter(x=>x.id!==uid_));
+    logAct(CU.id,`Eliminó usuario "${u.name}"`);
+    notify('✅','Usuario eliminado',u.name,3000);go('users');
+  });
+}
+function viewHist(uid_){
+  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
+  document.getElementById('mt-hist').textContent=`📋 Historial de ${u.name}`;
+  const h=u.history||[];
+  document.getElementById('mb-hist').innerHTML=`
+    <div style="margin-bottom:12px"><span class="badge b-${u.role}">${ROLES[u.role]}</span>
+      <span style="font-size:12px;color:var(--muted);margin-left:8px">${h.length} acciones registradas</span></div>
+    ${!h.length?'<div class="empty"><p>Sin historial de acciones.</p></div>':
+    `<div class="scrl" style="max-height:460px">${h.map(x=>`
+      <div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--birria);flex-shrink:0;margin-top:5px"></div>
+        <div><div style="font-size:13px;font-weight:500">${x.action}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${fd(x.timestamp)}</div></div>
+      </div>`).join('')}</div>`}`;
+  om('m-hist');
+}
+
+// ═══════════════════════════════════════════
+// KEYBOARD + INIT
+// ═══════════════════════════════════════════
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    document.querySelectorAll('.mov.open').forEach(m=>{m.style.display='none';m.classList.remove('open')});
+    document.getElementById('m-confirm').classList.remove('open');
+  }
+});
+
+initData();
+startClock();
+
+// Auto-restore session
+const sess=LS.obj('be_session',null);
+if(sess?.uid){
+  const u=LS.get('be_users').find(x=>x.id===sess.uid&&x.active!==false);
+  if(u){CU=u;startApp();}
+}
+</script>
+</body>
+</html>
