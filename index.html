@@ -204,6 +204,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FDFAF8}
 .ocard[data-s="bar"]{border-left:4px solid #8B5CF6}
 .ocard[data-s="delivered"]{border-left:4px solid #0F766E}
 .ocard[data-s="paid"]{border-left:4px solid #9CA3AF}
+.ocard[data-s="cancelled"]{border-left:4px solid var(--err); opacity: 0.7;}
 /* ── CASHIER ── */
 .cslayout{display:grid;grid-template-columns:1fr 400px;gap:20px;align-items:start}
 .cord{background:var(--card);border-radius:var(--rs);border:1px solid var(--border);
@@ -457,8 +458,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FDFAF8}
 const API_URL = 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec'; 
 
 const ROLES={admin:'Administrador',waiter:'Mesero',cook:'Cocinero',cashier:'Cajero'};
-const SL={pending:'En Espera','in-process':'En Proceso',ready:'Listo',bar:'En Barra',delivered:'Entregado',paid:'Pagado'};
-const SB={pending:'bp_','in-process':'bip',ready:'br',bar:'bbar',delivered:'bdel',paid:'bpaid'};
+const SL={pending:'En Espera','in-process':'En Proceso',ready:'Listo',bar:'En Barra',delivered:'Entregado',paid:'Pagado',cancelled:'Cancelado'};
+const SB={pending:'bp_','in-process':'bip',ready:'br',bar:'bbar',delivered:'bdel',paid:'bpaid',cancelled:'bdel'};
 const VIEW_T={'orders':'📋 Pedidos','kitchen':'👨‍🍳 Cocina','cashier':'🏧 Caja','products':'🍖 Productos','corte':'📊 Corte','users':'👥 Usuarios'};
 
 // ═══════════════════════════════════════════
@@ -529,7 +530,7 @@ const nextNum=()=>String(LS.get('be_orders').length+1).padStart(4,'0');
 // ═══════════════════════════════════════════
 function initData(){
   if(!localStorage.getItem('be_users')){
-    LS.set('be_users',[{id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
+    LS.set('be_users',[{id:'user-1',name:'Brian',password:'123',role:'admin',active:true,
       createdAt:new Date().toISOString(),
       history:[{action:'Sistema inicializado. Usuario administrador creado.',timestamp:new Date().toISOString()}]}]);
   }
@@ -672,6 +673,24 @@ function notify(ico,title,msg,dur=4000,cls=''){
 }
 
 // ═══════════════════════════════════════════
+// ORDER CANCELLATION
+// ═══════════════════════════════════════════
+function cancelOrder(oid){
+  confirm2('¿Cancelar pedido?','El pedido será marcado como cancelado y no podrá ser editado.',()=>{
+    const orders=LS.get('be_orders');
+    const i=orders.findIndex(o=>o.id===oid);if(i===-1)return;
+    orders[i].status='cancelled';
+    LS.set('be_orders',orders);
+    logAct(CU.id,`Canceló el pedido #${orders[i].number}`);
+    notify('🚫','Pedido Cancelado',`El pedido #${orders[i].number} ha sido cancelado.`,3000);
+    if(CV==='orders') go('orders');
+    if(CV==='kitchen') go('kitchen');
+    if(CV==='cashier') { selOrder=null; go('cashier'); }
+    updBadges();
+  });
+}
+
+// ═══════════════════════════════════════════
 // ORDERS VIEW
 // ═══════════════════════════════════════════
 let orderCatFilter='all';
@@ -789,7 +808,7 @@ function buildCart(){
 }
 function buildMyOrders(){
   const orders=LS.get('be_orders');
-  const mine=orders.filter(o=>o.workerId===CU.id&&!['paid'].includes(o.status)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+  const mine=orders.filter(o=>o.workerId===CU.id&&!['paid','cancelled'].includes(o.status)).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
   if(!mine.length)return'<div class="empty" style="padding:16px 0"><p>Sin pedidos activos</p></div>';
   return mine.map(o=>`
     <div class="cord" style="cursor:default">
@@ -801,6 +820,7 @@ function buildMyOrders(){
       <div style="margin-top:8px;display:flex;gap:6px">
         ${o.status==='bar'?`<button class="btn bpu btn-sm" onclick="markDel('${o.id}')">🍽️ Marcar Entregado</button>`:''}
         <button class="btn bo btn-sm" onclick="editOrder('${o.id}')">✏️ Editar</button>
+        <button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
       </div>
     </div>`).join('');
 }
@@ -888,7 +908,7 @@ function rKitchen(c){
   const all=LS.get('be_orders');
   let filtered=kFilter==='all'?all:kFilter==='active'?all.filter(o=>!['paid','cancelled'].includes(o.status)):all.filter(o=>o.status===kFilter);
   const sorted=[...filtered].sort((a,b)=>{
-    const s={pending:0,'in-process':1,ready:2,bar:3,delivered:4,paid:5};
+    const s={pending:0,'in-process':1,ready:2,bar:3,delivered:4,paid:5,cancelled:6};
     return((s[a.status]||9)-(s[b.status]||9))||new Date(a.timestamp)-new Date(b.timestamp);
   });
   const cnt={pending:all.filter(o=>o.status==='pending').length,'in-process':all.filter(o=>o.status==='in-process').length,ready:all.filter(o=>o.status==='ready').length,bar:all.filter(o=>o.status==='bar').length};
@@ -927,8 +947,9 @@ function buildKCard(o){
     </div>
     <div class="ocf"><div class="sbts">
       ${btns[o.status]||''}
-      ${!['pending','paid','delivered'].includes(o.status)?`<button class="btn bo btn-sm" onclick="updStatus('${o.id}','pending')">⏪ Regresar</button>`:''}
-      ${['delivered','paid'].includes(o.status)?`<span style="font-size:12px;color:var(--muted)">Pedido completado</span>`:''}
+      ${!['pending','paid','delivered','cancelled'].includes(o.status)?`<button class="btn bo btn-sm" onclick="updStatus('${o.id}','pending')">⏪ Regresar</button>`:''}
+      ${!['paid','delivered','cancelled'].includes(o.status)?`<button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>`:''}
+      ${['delivered','paid','cancelled'].includes(o.status)?`<span style="font-size:12px;color:var(--muted)">Pedido completado o inactivo</span>`:''}
     </div></div>
   </div>`;
 }
@@ -1028,6 +1049,7 @@ function buildPayPanel(){
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn bo" onclick="showTicket()">🧾 Ver Ticket</button>
+      <button class="btn bd" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
       <button class="btn bs" style="flex:1" onclick="doPay()">✅ Cobrar</button>
     </div>
   </div>`;
@@ -1295,161 +1317,120 @@ function rCorte(c){
     ${buildSaleCard('Venta del Mes',sm,'var(--purple)',sm.monthStart?'Desde '+sm.monthStart:'',`<button class="btn bo" style="width:100%;margin-top:12px" onclick="resetSales('sm','el mes')">🔄 Reiniciar Mes</button>`)}
   </div>
   <div class="card">
-    <div class="ch"><div class="ct">📋 Historial de Cortes</div>
-      ${cuts.length?`<div style="display:flex;gap:8px">
-        <button class="btn bo btn-sm" onclick="printCuts('day')">📄 PDF Hoy</button>
-        <button class="btn bo btn-sm" onclick="printCuts('all')">📄 PDF Historial</button>
-      </div>`:''}
+    <div class="ch"><div class="ct">Historial de Cortes de Caja</div></div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Fecha / Hora</th><th>Responsable</th><th>Total Calculado</th><th>Diferencia Físico</th><th>Órdenes</th></tr></thead>
+        <tbody>
+          ${!cuts.length?'<tr><td colspan="5" class="empty">Sin cortes registrados</td></tr>':
+          cuts.sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)).map(ct=>`
+            <tr>
+              <td>${fd(ct.timestamp)}</td><td>${ct.workerName}</td>
+              <td><strong>${fc(ct.calcTotal)}</strong></td>
+              <td style="color:${ct.diff>=0?'var(--ok)':'var(--err)'};font-weight:700">${ct.diff>0?'+':''}${fc(ct.diff)}</td>
+              <td>${ct.ordersCount}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
     </div>
-    ${!cuts.length?'<div class="empty"><div class="ei">📊</div><p>Sin cortes registrados aún.</p></div>':
-    `<div class="tw"><table>
-      <thead><tr><th>Fecha</th><th>Cajero</th><th>C. Inicial</th><th>Ventas</th><th>Efectivo</th><th>Tarjeta</th><th>Transfer.</th><th>Esperado</th><th>Físico</th><th>Diferencia</th></tr></thead>
-      <tbody>${cuts.slice().reverse().map(ct=>`<tr>
-        <td>${fds(ct.timestamp)}</td><td>${ct.workerName}</td>
-        <td>${fc(ct.initCash)}</td><td>${fc(ct.salesTotal)}</td>
-        <td>${fc(ct.cash)}</td><td>${fc(ct.card)}</td><td>${fc(ct.transfer)}</td>
-        <td>${fc(ct.expectedCash)}</td><td>${fc(ct.physicalCash)}</td>
-        <td style="color:${ct.diff===0?'var(--ok)':ct.diff>0?'var(--warn)':'var(--err)'}">
-          <strong>${ct.diff>0?'+':''}${fc(ct.diff)}</strong>
-          <span style="font-size:11px"> ${ct.diff===0?'✅ Cuadra':ct.diff>0?'⬆️ Sobra':'⬇️ Falta'}</span>
-        </td></tr>`).join('')}</tbody>
-    </table></div>`}
   </div>`;
 }
-function buildSaleCard(ttl,s,color,sub,extra){
-  return`<div class="stat" style="border-top:4px solid ${color}">
-    <div class="stl">${ttl}</div>
-    <div class="stv">${fc(s.total)}</div>
-    <div class="sts">${sub}</div>
+function buildSaleCard(ttl,dt,col,sub,acts){
+  return`<div class="card" style="border-top:4px solid ${col}">
+    <div class="stl">${ttl}</div><div class="stv">${fc(dt.total)}</div><div class="sts">${sub}</div>
     <div class="cmeths">
-      <div class="mcard mc"><div class="mamt">${fc(s.cash)}</div><div class="mlbl">💵 Efectivo</div></div>
-      <div class="mcard mk"><div class="mamt">${fc(s.card)}</div><div class="mlbl">💳 Tarjeta</div></div>
-      <div class="mcard mt"><div class="mamt">${fc(s.transfer)}</div><div class="mlbl">📱 Transfer.</div></div>
-    </div>
-    ${extra}
-  </div>`;
+      <div class="mcard mc"><div class="mamt">${fc(dt.cash)}</div><div class="mlbl">Efectivo</div></div>
+      <div class="mcard mk"><div class="mamt">${fc(dt.card)}</div><div class="mlbl">Tarjeta</div></div>
+      <div class="mcard mt"><div class="mamt">${fc(dt.transfer)}</div><div class="mlbl">Transf.</div></div>
+    </div>${acts}</div>`;
+}
+function resetSales(key,lbl){
+  confirm2(`¿Reiniciar ${lbl}?`,`Los totales acumulados de ${lbl} volverán a cero.`,()=>{
+    const d={total:0,cash:0,card:0,transfer:0};
+    if(key==='sw')d.weekStart=weekStart();if(key==='sm')d.monthStart=monthStart();
+    LS.set(key,d);logAct(CU.id,`Reinició ventas de ${lbl}`);go('corte');
+  });
 }
 function openCierre(){
-  const sd=LS.obj('be_sd',{});
-  document.getElementById('ci-ini').value=sd.initCash||'';
+  const sd=LS.obj('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
+  document.getElementById('ci-ini').value=sd.initCash||0;
   document.getElementById('ci-fis').value='';
   document.getElementById('ci-res').style.display='none';
   document.getElementById('btn-corte').style.display='none';
-  cierreData=null;om('m-cierre');
+  om('m-cierre');
 }
 function calcCierre(){
   const ini=parseFloat(document.getElementById('ci-ini').value)||0;
   const fis=parseFloat(document.getElementById('ci-fis').value);
-  if(isNaN(fis)){notify('⚠️','Ingresa el monto','Por favor ingresa el dinero físico contado.',3000);return}
-  const sd=LS.obj('be_sd',{cash:0});
-  const cashSales=sd.cash||0;
-  const expected=ini+cashSales;
-  const diff=fis-expected;
-  cierreData={ini,fis,expected,diff,cashSales};
-  const cls=diff===0?'ok':diff>0?'over':'short';
-  const msg=diff===0?'✅ La caja cuadra perfectamente.':diff>0?`⬆️ Sobran ${fc(Math.abs(diff))}`:(`⬇️ Faltan ${fc(Math.abs(diff))}`);
+  if(isNaN(fis)){notify('⚠️','Ingresa efectivo físico','Debes ingresar el monto físico contado en caja.',3000);return}
+  const sd=LS.obj('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
+  sd.initCash=ini;LS.set('be_sd',sd);
+  const calc=sd.cash+ini;const diff=fis-calc;
   const resEl=document.getElementById('ci-res');
-  resEl.innerHTML=`<div class="chkbox ${cls}">
-    <div class="prow"><span>Caja Inicial:</span><strong>${fc(ini)}</strong></div>
-    <div class="prow"><span>Ventas en Efectivo:</span><strong>${fc(cashSales)}</strong></div>
-    <div class="prow" style="border-top:1px solid var(--border);margin-top:4px;padding-top:8px">
-      <span>Efectivo Esperado:</span><strong>${fc(expected)}</strong></div>
-    <div class="prow"><span>Efectivo Físico:</span><strong>${fc(fis)}</strong></div>
-    <div class="prow" style="font-size:16px;font-weight:900;border-top:2px solid var(--border);margin-top:6px;padding-top:10px">
-      <span>Diferencia:</span>
-      <span style="color:${cls==='ok'?'var(--ok)':cls==='over'?'var(--warn)':'var(--err)'}">
-        ${diff>0?'+':''}${fc(diff)}</span></div>
-    <div style="margin-top:6px;font-weight:700">${msg}</div>
-  </div>`;
+  let cls='ok',ic='✅',msg='Caja Cuadrada';
+  if(diff>0){cls='over';ic='⚠️';msg='Sobrante en caja'}
+  else if(diff<0){cls='short';ic='❌';msg='Faltante en caja'}
+  cierreData={initCash:ini,calcTotal:calc,physTotal:fis,diff,cashSales:sd.cash,
+    cardSales:sd.card,transSales:sd.transfer,totalSales:sd.total,ordersCount:LS.get('be_orders').filter(o=>o.status==='paid'&&o.paidAt?.startsWith(today())).length};
   resEl.style.display='block';
-  document.getElementById('btn-corte').style.display='';
+  resEl.innerHTML=`<div class="chkbox ${cls}">
+    <div style="font-size:16px;font-weight:700;margin-bottom:8px">${ic} ${msg}</div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Efectivo ventas:</span><span>${fc(sd.cash)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Caja Inicial:</span><span>${fc(ini)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px dashed var(--border);padding-top:4px;margin-top:4px">
+      <span>Efectivo Esperado:</span><span>${fc(calc)}</span></div>
+    <div style="font-size:16px;font-weight:900;text-align:center;margin-top:10px;color:var(--${diff<0?'err':diff>0?'warn':'ok'})">
+      Diferencia: ${diff>0?'+':''}${fc(diff)}</div>
+  </div>`;
+  document.getElementById('btn-corte').style.display='block';
 }
 function doCorte(){
-  if(!cierreData)return;
-  const sd=LS.obj('be_sd',{total:0,cash:0,card:0,transfer:0});
-  const cut={id:uid(),timestamp:new Date().toISOString(),workerName:CU.name,workerId:CU.id,
-    initCash:cierreData.ini,salesTotal:sd.total,cash:sd.cash,card:sd.card,transfer:sd.transfer,
-    expectedCash:cierreData.expected,physicalCash:cierreData.fis,diff:cierreData.diff,date:today()};
-  const cuts=LS.get('be_cuts');cuts.push(cut);LS.set('be_cuts',cuts);
-  // Reset daily only
-  LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:cierreData.fis});
-  logAct(CU.id,`Corte de caja. Ventas: ${fc(sd.total)}. Diferencia: ${fc(cierreData.diff)}`);
-  cm('m-cierre');notify('✅','Corte realizado',`Ventas del día: ${fc(sd.total)}`,4000);
-  cierreData=null;go('corte');
-}
-function resetSales(key,label){
-  confirm2(`¿Reiniciar ventas de ${label}?`,`El contador de ${label} volverá a cero. ¿Continuar?`,()=>{
-    if(key==='sw')LS.set('be_sw',{total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
-    else if(key==='sm')LS.set('be_sm',{total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
-    logAct(CU.id,`Reinició ventas de ${label}`);
-    notify('✅','Reiniciado',`Contador de ${label} reiniciado.`,3000);go('corte');
-  },'Reiniciar','bw');
-}
-function printCuts(mode){
   const cuts=LS.get('be_cuts');
-  const list=mode==='day'?cuts.filter(c=>c.date===today()):cuts;
-  const w=window.open('','_blank','width=900,height=600');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cortes - Birria Express</title>
-  <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px}h1{font-size:18px}
-  table{width:100%;border-collapse:collapse;margin-top:16px}
-  th{background:#f5f5f5;padding:8px;text-align:left;border:1px solid #ddd}
-  td{padding:7px 8px;border:1px solid #ddd}.ok{color:green}.over{color:orange}.short{color:red}
-  @media print{body{margin:0}}</style></head><body>
-  <h1>🔥 BIRRIA EXPRESS — ${mode==='day'?'Corte del Día ('+today()+')':'Historial de Cortes'}</h1>
-  <div>Generado: ${new Date().toLocaleString('es-MX')}</div>
-  <table><thead><tr><th>Fecha</th><th>Cajero</th><th>C.Inicial</th><th>Ventas</th><th>Efectivo</th><th>Tarjeta</th><th>Transfer.</th><th>Esperado</th><th>Físico</th><th>Diferencia</th></tr></thead>
-  <tbody>${list.slice().reverse().map(c=>`<tr>
-    <td>${fds(c.timestamp)}</td><td>${c.workerName}</td>
-    <td>${fc(c.initCash)}</td><td>${fc(c.salesTotal)}</td>
-    <td>${fc(c.cash)}</td><td>${fc(c.card)}</td><td>${fc(c.transfer)}</td>
-    <td>${fc(c.expectedCash)}</td><td>${fc(c.physicalCash)}</td>
-    <td class="${c.diff===0?'ok':c.diff>0?'over':'short'}">${c.diff>0?'+':''}${fc(c.diff)} ${c.diff===0?'✅':c.diff>0?'⬆️':'⬇️'}</td>
-  </tr>`).join('')}</tbody></table>
-  <script>window.onload=()=>{window.print();window.close()}<\/script></body></html>`);
-  w.document.close();
+  const d={...cierreData,id:uid(),timestamp:new Date().toISOString(),workerId:CU.id,workerName:CU.name};
+  cuts.push(d);LS.set('be_cuts',cuts);
+  // Reset Day
+  LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:d.physTotal});
+  logAct(CU.id,`Realizó corte de caja. Dif: ${fc(d.diff)}`);
+  cm('m-cierre');notify('🔒','Corte realizado','El corte de caja se ha guardado.',4000);
+  go('corte');
 }
 
 // ═══════════════════════════════════════════
 // USERS VIEW
 // ═══════════════════════════════════════════
 function rUsers(c){
+  if(CU.role!=='admin'){
+    c.innerHTML=`<div class="empty"><div class="ei">🔒</div><h3>Acceso Denegado</h3><p>Solo los administradores pueden gestionar usuarios.</p></div>`;return}
   const users=LS.get('be_users');
   c.innerHTML=`<div class="card">
-    <div class="ch"><div class="ct">👥 Gestión de Usuarios</div>
-      <button class="btn bp" onclick="openUser()">+ Nuevo Usuario</button></div>
-    <div class="tw"><table>
-      <thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Últimas Acciones</th><th>Acciones</th></tr></thead>
-      <tbody>${users.map(u=>`<tr>
-        <td><div style="display:flex;align-items:center;gap:8px">
-          <div style="width:32px;height:32px;background:var(--birria);border-radius:50%;
-            display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;flex-shrink:0">
-            ${u.name.charAt(0).toUpperCase()}</div>
-          <div><strong>${u.name}</strong>${u.id===CU?.id?' <span style="font-size:11px;color:var(--birria)">(Tú)</span>':''}</div>
-        </div></td>
-        <td><span class="badge b-${u.role}">${ROLES[u.role]||u.role}</span></td>
-        <td><span class="badge ${u.active===false?'':'br'}" style="${u.active===false?'background:#F3F4F6;color:#6B7280':''}">
-          ${u.active===false?'Inactivo':'Activo'}</span></td>
-        <td style="font-size:12px;color:var(--muted)">
-          ${(u.history||[]).slice(0,2).map(h=>`<div>${h.action} · <em>${fd(h.timestamp)}</em></div>`).join('')||'—'}
-        </td>
-        <td><div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn bo btn-sm" onclick="viewHist('${u.id}')">📋 Historial</button>
-          <button class="btn bo btn-sm" onclick="openUser('${u.id}')">✏️ Editar</button>
-          <button class="btn btn-sm ${u.active===false?'bs':'bw'}" onclick="togUser('${u.id}')">
-            ${u.active===false?'✅ Activar':'🚫 Desactivar'}</button>
-          ${u.id!==CU?.id?`<button class="btn bd btn-sm" onclick="delUser('${u.id}')">🗑️</button>`:''}
-        </div></td>
-      </tr>`).join('')}</tbody>
-    </table></div>
+    <div class="ch"><div class="ct">👥 Usuarios del Sistema</div><button class="btn bp" onclick="openUser()">+ Nuevo Usuario</button></div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Nombre</th><th>Rol</th><th>Creación</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody>${users.map(u=>`<tr>
+          <td><strong>${u.name}</strong></td>
+          <td><span class="badge b-${u.role}">${ROLES[u.role]||u.role}</span></td>
+          <td>${fds(u.createdAt)}</td>
+          <td><span class="badge ${u.active===false?'':'br'}" style="${u.active===false?'background:#F3F4F6;color:#6B7280':''}">
+            ${u.active===false?'Inactivo':'Activo'}</span></td>
+          <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn bo btn-sm" onclick="openUser('${u.id}')">✏️ Editar</button>
+            ${u.id!==CU.id?`<button class="btn btn-sm ${u.active===false?'bs':'bw'}" onclick="togUser('${u.id}')">
+              ${u.active===false?'✅ Activar':'🚫 Desactivar'}</button>`:''}
+            <button class="btn bo btn-sm" onclick="showHist('${u.id}')">📜 Historial</button>
+          </div></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
   </div>`;
 }
-function openUser(uid_){
-  document.getElementById('ue-id').value=uid_||'';
-  if(uid_){
-    const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
+function openUser(uid){
+  document.getElementById('ue-id').value=uid||'';
+  if(uid){
+    const u=LS.get('be_users').find(x=>x.id===uid);if(!u)return;
     document.getElementById('mt-user').textContent='Editar Usuario';
     document.getElementById('ue-name').value=u.name;
-    document.getElementById('ue-pass').value='';
+    document.getElementById('ue-pass').value=u.password;
     document.getElementById('ue-role').value=u.role;
   }else{
     document.getElementById('mt-user').textContent='Nuevo Usuario';
@@ -1463,74 +1444,53 @@ function saveUser(){
   const pass=document.getElementById('ue-pass').value;
   const role=document.getElementById('ue-role').value;
   const eid=document.getElementById('ue-id').value;
-  if(!name||!role){notify('⚠️','Campos requeridos','El nombre y rol son obligatorios.',3000);return}
+  if(!name||!pass){notify('⚠️','Campos requeridos','Nombre y contraseña son obligatorios.',3000);return}
   const users=LS.get('be_users');
+  if(users.some(u=>u.name.toLowerCase()===name.toLowerCase()&&u.id!==eid)){
+    notify('⚠️','Nombre duplicado','Ya existe un usuario con ese nombre.',3000);return}
   if(eid){
-    const i=users.findIndex(u=>u.id===eid);
-    if(i!==-1){users[i].name=name;users[i].role=role;if(pass)users[i].password=pass;
-      logAct(CU.id,`Editó usuario "${name}"`);}
+    const i=users.findIndex(u=>u.id===eid);if(i===-1)return;
+    users[i]={...users[i],name,password:pass,role};
+    logAct(CU.id,`Editó usuario "${name}"`);
   }else{
-    if(!pass){notify('⚠️','Contraseña requerida','Por favor ingresa una contraseña.',3000);return}
-    if(users.find(u=>u.name.toLowerCase()===name.toLowerCase())){
-      notify('⚠️','Usuario existente',`Ya existe un usuario con el nombre "${name}".`,3000);return}
-    users.push({id:uid(),name,password:pass,role,active:true,createdAt:new Date().toISOString(),
-      history:[{action:`Usuario creado por ${CU.name}`,timestamp:new Date().toISOString()}]});
+    users.push({id:'u-'+Date.now(),name,password:pass,role,active:true,createdAt:new Date().toISOString(),history:[]});
     logAct(CU.id,`Creó usuario "${name}" (${ROLES[role]})`);
   }
-  LS.set('be_users',users);cm('m-user');
-  notify('✅',eid?'Usuario actualizado':'Usuario creado',name,3000);go('users');
+  LS.set('be_users',users);cm('m-user');notify('✅',eid?'Usuario actualizado':'Usuario creado',name,3000);go('users');
 }
-function togUser(uid_){
-  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes desactivar tu propio usuario.',3000);return}
-  const users=LS.get('be_users');const i=users.findIndex(u=>u.id===uid_);if(i===-1)return;
+function togUser(uid){
+  if(uid===CU.id)return;
+  const users=LS.get('be_users');const i=users.findIndex(u=>u.id===uid);if(i===-1)return;
   users[i].active=users[i].active===false?true:false;LS.set('be_users',users);
   logAct(CU.id,`${users[i].active?'Activó':'Desactivó'} usuario "${users[i].name}"`);go('users');
 }
-function delUser(uid_){
-  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes eliminar tu propio usuario.',3000);return}
-  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
-  confirm2(`¿Eliminar a "${u.name}"?`,'Esta acción no se puede deshacer.',()=>{
-    LS.set('be_users',LS.get('be_users').filter(x=>x.id!==uid_));
-    logAct(CU.id,`Eliminó usuario "${u.name}"`);
-    notify('✅','Usuario eliminado',u.name,3000);go('users');
-  });
-}
-function viewHist(uid_){
-  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
-  document.getElementById('mt-hist').textContent=`📋 Historial de ${u.name}`;
+function showHist(uid){
+  const u=LS.get('be_users').find(x=>x.id===uid);if(!u)return;
+  document.getElementById('mt-hist').textContent=`Historial de ${u.name}`;
   const h=u.history||[];
-  document.getElementById('mb-hist').innerHTML=`
-    <div style="margin-bottom:12px"><span class="badge b-${u.role}">${ROLES[u.role]}</span>
-      <span style="font-size:12px;color:var(--muted);margin-left:8px">${h.length} acciones registradas</span></div>
-    ${!h.length?'<div class="empty"><p>Sin historial de acciones.</p></div>':
-    `<div class="scrl" style="max-height:460px">${h.map(x=>`
-      <div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
-        <div style="width:8px;height:8px;border-radius:50%;background:var(--birria);flex-shrink:0;margin-top:5px"></div>
-        <div><div style="font-size:13px;font-weight:500">${x.action}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${fd(x.timestamp)}</div></div>
-      </div>`).join('')}</div>`}`;
+  document.getElementById('mb-hist').innerHTML=`<div class="scrl">
+    ${!h.length?'<div class="empty">Sin actividad registrada</div>':
+    `<div style="display:flex;flex-direction:column;gap:12px">${h.map(i=>`
+      <div style="border-left:2px solid var(--border);padding-left:14px">
+        <div style="font-size:13px;color:var(--text)">${i.action}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${fd(i.timestamp)}</div>
+      </div>`).join('')}</div>`}
+  </div>`;
   om('m-hist');
 }
 
 // ═══════════════════════════════════════════
-// KEYBOARD + INIT
+// START
 // ═══════════════════════════════════════════
-document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){
-    document.querySelectorAll('.mov.open').forEach(m=>{m.style.display='none';m.classList.remove('open')});
-    document.getElementById('m-confirm').classList.remove('open');
+window.onload=()=>{
+  initData();
+  const s=LS.get('be_session',null);
+  if(s&&s.uid){
+    const u=LS.get('be_users').find(x=>x.id===s.uid&&x.active!==false);
+    if(u){CU=u;startApp();return}
   }
-});
-
-initData();
-startClock();
-
-// Auto-restore session
-const sess=LS.obj('be_session',null);
-if(sess?.uid){
-  const u=LS.get('be_users').find(x=>x.id===sess.uid&&x.active!==false);
-  if(u){CU=u;startApp();}
-}
+  document.getElementById('login-screen').style.display='flex';
+};
 </script>
 </body>
 </html>
