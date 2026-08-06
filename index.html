@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<base target="_top">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🔥 Birria Express — Sistema de Gestión</title>
@@ -17,7 +18,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 /* ── LOGIN ── */
-#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;
+#login-screen{display:none;min-height:100vh;align-items:center;justify-content:center;
   background:linear-gradient(135deg,#1A0B06 0%,#3D1A0A 45%,#C8400A 100%);padding:20px}
 .lcard{background:var(--card);border-radius:20px;padding:48px 40px;width:100%;max-width:400px;
   box-shadow:var(--sh2);text-align:center}
@@ -277,6 +278,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FDFAF8}
 </head>
 <body>
 
+<!-- LOADER DB -->
+<div id="loader" style="position:fixed;inset:0;background:#1A0B06;color:#C8400A;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:40px;letter-spacing:3px;">
+  🔥 CARGANDO SISTEMA...
+  <div style="font-family:'Inter',sans-serif;font-size:14px;color:#F0D5C0;margin-top:10px;letter-spacing:1px;font-weight:300;">Sincronizando con Base de Datos</div>
+</div>
+
 <!-- LOGIN -->
 <div id="login-screen">
   <div class="lcard">
@@ -435,6 +442,33 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FDFAF8}
     <div class="mf"><button class="btn bo" onclick="cm('m-disc')">Cancelar</button><button class="btn bp" onclick="applyDisc()">Aplicar</button></div>
   </div>
 </div>
+<!-- Cancel Reason -->
+<div class="mov" id="m-cancel-reason">
+  <div class="modal" style="max-width:420px">
+    <div class="mh"><div class="mt">🚫 Cancelar Pedido</div><button class="mc" onclick="cm('m-cancel-reason')">✕</button></div>
+    <div class="mb">
+      <p style="font-size:14px;color:var(--muted);margin-bottom:14px">El pedido será marcado como cancelado. Esta acción no se puede deshacer.</p>
+      <div class="fg"><label class="fl">Motivo de Cancelación *</label>
+        <select class="fc" id="cr-preset" onchange="if(this.value){document.getElementById('cr-reason').value=this.value;this.value=''}">
+          <option value="">— Selecciona un motivo rápido —</option>
+          <option value="Cliente canceló el pedido">Cliente canceló el pedido</option>
+          <option value="Error en el pedido">Error en el pedido</option>
+          <option value="Producto no disponible">Producto no disponible</option>
+          <option value="Tiempo de espera muy largo">Tiempo de espera muy largo</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Descripción del motivo</label>
+        <textarea class="fc" id="cr-reason" placeholder="Describe el motivo de la cancelación..." rows="3"></textarea>
+      </div>
+      <input type="hidden" id="cr-oid"/>
+    </div>
+    <div class="mf">
+      <button class="btn bo" onclick="cm('m-cancel-reason')">Regresar</button>
+      <button class="btn bd" onclick="confirmCancelOrder()">🚫 Confirmar Cancelación</button>
+    </div>
+  </div>
+</div>
 <!-- Confirm -->
 <div class="cov" id="m-confirm">
   <div class="cbox">
@@ -451,106 +485,87 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FDFAF8}
 
 <script>
 // ═══════════════════════════════════════════
+// CONFIGURACIÓN DE CONEXIÓN GITHUB <-> APPS SCRIPT
+// ═══════════════════════════════════════════
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec';
+
+// ═══════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════
-// IMPORTANTE: Pon aquí la URL de tu Web App de Google Apps Script
-const API_URL = 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec'; 
-
 const ROLES={admin:'Administrador',waiter:'Mesero',cook:'Cocinero',cashier:'Cajero'};
+const ROLE_VIEWS={admin:['orders','kitchen','cashier','products','corte','users'],waiter:['orders'],cook:['kitchen'],cashier:['cashier','corte']};
 const SL={pending:'En Espera','in-process':'En Proceso',ready:'Listo',bar:'En Barra',delivered:'Entregado',paid:'Pagado',cancelled:'Cancelado'};
-const SB={pending:'bp_','in-process':'bip',ready:'br',bar:'bbar',delivered:'bdel',paid:'bpaid',cancelled:''};
+const SB={pending:'bp_','in-process':'bip',ready:'br',bar:'bbar',delivered:'bdel',paid:'bpaid',cancelled:'bd'};
 const VIEW_T={'orders':'📋 Pedidos','kitchen':'👨‍🍳 Cocina','cashier':'🏧 Caja','products':'🍖 Productos','corte':'📊 Corte','users':'👥 Usuarios'};
 
 // ═══════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════
-let CU=null,CV='orders',cart=[],selOrder=null,csPayments={cash:0,card:0,transfer:0},csDisc={type:'none',value:0,reason:''},cierreData=null,cfCB=null,kFilter='active',pFlt={name:'',cat:''};
-let editingOrderId=null; // Estado para rastrear si se está editando un pedido
+let CU=null,CV='orders',cart=[],selOrder=null,csPayments={cash:0,card:0,transfer:0},csDisc={type:'none',value:0,reason:''},cierreData=null,cfCB=null,kFilter='active',pFlt={name:'',cat:''},editingOrderId=null;
 
 // ═══════════════════════════════════════════
-// LOCALSTORAGE Y GOOGLE SHEETS SYNC
+// DATOS EN APP SCRIPT (Sincronización Dual)
 // ═══════════════════════════════════════════
-// ── COLA DE ESCRITURA A GOOGLE SHEETS ───────────────────────
-// Usamos una cola para evitar race conditions y manejar
-// la restricción de CORS de Google Apps Script.
-// POST se hace con mode:'no-cors' (GAS lo acepta; no leemos respuesta).
-// GET usa fetch normal ya que GAS permite GET con CORS.
-const SQ = { queue: [], running: false };
-// Claves que NO se sincronizan (privadas/temporales)
-const SHEETS_SKIP = ['be_session'];
-function sheetsSend(key, value) {
-  if (!API_URL || API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
-  if (SHEETS_SKIP.includes(key)) return;  // sesión es local únicamente
-  SQ.queue.push({ key, value });
-  if (!SQ.running) sheetsFlush();
-}
-async function sheetsFlush() {
-  SQ.running = true;
-  while (SQ.queue.length > 0) {
-    // Si hay múltiples actualizaciones de la misma clave, solo enviamos la última
-    const last = {};
-    SQ.queue.forEach(item => { last[item.key] = item.value; });
-    SQ.queue = [];
-    for (const [key, value] of Object.entries(last)) {
-      try {
-        await fetch(API_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-          body: JSON.stringify({ key, value })
-        });
-      } catch(e) {
-        console.warn('[Sheets] Error enviando ' + key + ':', e.message);
-      }
+let LCache = {};
+
+const LS = {
+  get: (k, d = []) => { return LCache[k] !== undefined ? LCache[k] : d },
+  set: (k, v) => { 
+    LCache[k] = v; 
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run.saveData(k, v); 
+    } else if (SCRIPT_URL && SCRIPT_URL.trim() !== '') {
+      fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'save', key: k, value: v }),
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+      }).catch(e => console.error("Error de guardado:", e));
     }
-  }
-  SQ.running = false;
-}
-
-// ── LOCALSTORAGE + SYNC ──────────────────────────────────────
-const LS={
-  get:(k,d=[])=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}},
-  set:(k,v)=>{
-    localStorage.setItem(k,JSON.stringify(v));
-    // Enviar a Google Sheets en segundo plano (sin bloquear UI)
-    sheetsSend(k, v);
   },
-  obj:(k,d={})=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
+  obj: (k, d = {}) => { return LCache[k] !== undefined && Object.keys(LCache[k]).length > 0 ? LCache[k] : d }
 };
 
-// ── POLLING: trae cambios desde Google Sheets ────────────────
-// Esto permite que múltiples dispositivos vean los mismos datos
-async function syncData(isInit = false) {
-  if (!API_URL || API_URL === 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec') return;
-  try {
-    const res = await fetch(API_URL + '?t=' + Date.now(), { mode: 'cors' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    let changed = false;
-    for (const [k, v] of Object.entries(data)) {
-      const local = localStorage.getItem(k);
-      const remote = JSON.stringify(v);
-      // Solo actualizar si el valor remoto es más reciente o es init
-      if (isInit || local !== remote) {
-        localStorage.setItem(k, remote);
-        changed = true;
-      }
-    }
-    if (changed && !isInit) {
-      updBadges();
-      if (['kitchen', 'orders', 'cashier'].includes(CV)) go(CV);
-    }
-  } catch (e) {
-    console.warn('[Sheets] Sin sincronización:', e.message);
+window.onload = () => {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withFailureHandler(err => {
+        document.getElementById('loader').style.display = 'none';
+        initData();
+        document.getElementById('login-screen').style.display = 'flex';
+        notify('⚠️', 'Aviso', 'Problema al sincronizar con Sheets. Entrando en modo local.', 5000);
+      })
+      .withSuccessHandler(data => {
+        LCache = data || {};
+        document.getElementById('loader').style.display = 'none';
+        initData();
+        document.getElementById('login-screen').style.display = 'flex';
+      }).loadAllData();
+  } else {
+    fetch(SCRIPT_URL + '?action=load')
+      .then(res => res.json())
+      .then(data => {
+        LCache = data || {};
+        document.getElementById('loader').style.display = 'none';
+        initData();
+        document.getElementById('login-screen').style.display = 'flex';
+      })
+      .catch(err => {
+        document.getElementById('loader').style.display = 'none';
+        initData();
+        document.getElementById('login-screen').style.display = 'flex';
+        notify('⚠️', 'Aviso', 'Falla de conexión a Apps Script. Entrando en modo local.', 5000);
+      });
   }
-}
-// Polling cada 12 segundos (suficiente sin saturar cuota de GAS)
-setInterval(syncData, 12000);
+};
 
 // ═══════════════════════════════════════════
 // UTILS
 // ═══════════════════════════════════════════
+const $=(id)=>document.getElementById(id);
+const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
 const uid=()=>'id-'+Date.now().toString(36)+'-'+Math.random().toString(36).substr(2,5);
 const fc=(n)=>'$'+(parseFloat(n)||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');
 const fd=(iso)=>{if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})};
@@ -563,82 +578,71 @@ const nextNum=()=>String(LS.get('be_orders').length+1).padStart(4,'0');
 // ═══════════════════════════════════════════
 // INIT DATA
 // ═══════════════════════════════════════════
-// Datos por defecto solo si Sheets no tiene nada
-const DEFAULT_USERS=[{id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
-  createdAt:new Date().toISOString(),
-  history:[{action:'Sistema inicializado. Usuario administrador creado.',timestamp:new Date().toISOString()}]}];
-const DEFAULT_PRODUCTS=[
-  {id:'prod-1',name:'Birria de res',description:'Birria tradicional de res con consomé incluido',category:'Platos Fuertes',price:120,active:true},
-  {id:'prod-2',name:'Taco de birria',description:'Taco dorado de birria con queso manchego',category:'Tacos',price:25,active:true},
-  {id:'prod-3',name:'Quesabirria',description:'Quesadilla de birria gratinada con queso Oaxaca',category:'Especialidades',price:45,active:true},
-  {id:'prod-4',name:'Orden 3 Tacos',description:'3 tacos de birria con consomé y salsas de la casa',category:'Tacos',price:70,active:true},
-  {id:'prod-5',name:'Consomé',description:'Consomé de birria 250ml caliente',category:'Bebidas',price:30,active:true},
-  {id:'prod-6',name:'Agua Fresca',description:'Agua fresca del día 500ml',category:'Bebidas',price:25,active:true},
-];
-
-async function initData(){
-  // Si hay API configurada, PRIMERO intentar cargar desde Sheets
-  // Esto garantiza que en un dispositivo nuevo los datos de Sheets tienen prioridad
-  if(API_URL && API_URL !== 'https://script.google.com/macros/s/AKfycbwtIO1lTtQ_83ZP48Q2zBmyU-IrdfQZuycdtFXjASWALHYLmP3prhll1pTUnF7i3Ajsog/exec'){
-    try{
-      const res = await fetch(API_URL + '?t=' + Date.now(), { mode:'cors' });
-      if(res.ok){
-        const remote = await res.json();
-        if(!remote.error){
-          // Guardar cada clave remota en localStorage SIN reenviar a Sheets (directo)
-          for(const [k,v] of Object.entries(remote)){
-            if(v !== null && v !== undefined){
-              const curr = localStorage.getItem(k);
-              // Solo si el valor remoto tiene datos reales
-              const isEmpty = Array.isArray(v) ? v.length===0 : (typeof v==='object' ? Object.keys(v).length===0 : false);
-              if(!isEmpty || !curr){
-                localStorage.setItem(k, JSON.stringify(v));
-              }
-            }
-          }
-        }
-      }
-    }catch(e){ console.warn('[initData] No se pudo cargar desde Sheets:', e.message); }
+function initData(){
+  if(!LCache['be_users'] || LCache['be_users'].length === 0){
+    LS.set('be_users',[{id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
+      createdAt:new Date().toISOString(),
+      history:[{action:'Sistema inicializado. Usuario administrador creado.',timestamp:new Date().toISOString()}]}]);
   }
-
-  // Aplicar defaults: si la clave no existe O está vacía, usar el valor por defecto
-  const writeDefault = (key, val) => {
-    const raw = localStorage.getItem(key);
-    let isEmpty = !raw;
-    if(!isEmpty){
-      try{
-        const parsed = JSON.parse(raw);
-        isEmpty = Array.isArray(parsed) ? parsed.length===0
-                : (parsed && typeof parsed==='object' ? Object.keys(parsed).length===0 : false);
-      }catch(e){ isEmpty = true; }
-    }
-    if(isEmpty){
-      localStorage.setItem(key, JSON.stringify(val));
-      sheetsSend(key, val);
-    }
-  };
-  writeDefault('be_users', DEFAULT_USERS);
-  writeDefault('be_products', DEFAULT_PRODUCTS);
-  writeDefault('be_orders', []);
-  writeDefault('be_cuts', []);
-  writeDefault('be_sd', {total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
-  writeDefault('be_sw', {total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
-  writeDefault('be_sm', {total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
-
-  // Garantía adicional: si no hay ningún admin activo, insertar Brian
-  const users = LS.get('be_users');
-  const hasAdmin = users.some(u => u.role==='admin' && u.active!==false);
-  if(!hasAdmin){
-    const brianExists = users.some(u => u.name.toLowerCase()==='brian');
-    if(!brianExists){
-      const brian = {id:'user-1',name:'Brian',password:'1234',role:'admin',active:true,
-        createdAt:new Date().toISOString(),
-        history:[{action:'Usuario administrador creado automáticamente.',timestamp:new Date().toISOString()}]};
-      users.unshift(brian);
-      localStorage.setItem('be_users', JSON.stringify(users));
-      sheetsSend('be_users', users);
-    }
+  if(!LCache['be_products'] || LCache['be_products'].length === 0){
+    LS.set('be_products',[
+      {id:uid(),name:'Birria de res',description:'Birria tradicional de res con consomé incluido',category:'Platos Fuertes',price:120,active:true},
+      {id:uid(),name:'Taco de birria',description:'Taco dorado de birria con queso manchego',category:'Tacos',price:25,active:true},
+      {id:uid(),name:'Quesabirria',description:'Quesadilla de birria gratinada con queso Oaxaca',category:'Especialidades',price:45,active:true},
+      {id:uid(),name:'Orden 3 Tacos',description:'3 tacos de birria con consomé y salsas de la casa',category:'Tacos',price:70,active:true},
+      {id:uid(),name:'Consomé',description:'Consomé de birria 250ml caliente',category:'Bebidas',price:30,active:true},
+      {id:uid(),name:'Agua Fresca',description:'Agua fresca del día 500ml',category:'Bebidas',price:25,active:true},
+    ]);
   }
+  if(!LCache['be_orders']) LS.set('be_orders',[]);
+  if(!LCache['be_cuts']) LS.set('be_cuts',[]);
+  if(!LCache['be_caja']) LS.set('be_caja',[]);
+  if(!LCache['be_sd'] || !LCache['be_sd'].date) LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:0});
+  if(!LCache['be_sw'] || !LCache['be_sw'].weekStart) LS.set('be_sw',{total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
+  if(!LCache['be_sm'] || !LCache['be_sm'].monthStart) LS.set('be_sm',{total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
+}
+
+// ═══════════════════════════════════════════
+// CANCELAR Y EDITAR PEDIDOS
+// ═══════════════════════════════════════════
+function cancelOrder(oid){
+  document.getElementById('cr-oid').value = oid;
+  document.getElementById('cr-reason').value = '';
+  document.getElementById('cr-preset').value = '';
+  om('m-cancel-reason');
+}
+function confirmCancelOrder(){
+  const oid = document.getElementById('cr-oid').value;
+  const reason = document.getElementById('cr-reason').value.trim();
+  if(!reason){ notify('⚠️','Motivo requerido','Por favor indica el motivo de la cancelación.',3000); return; }
+  const orders = LS.get('be_orders');
+  const i = orders.findIndex(o => o.id === oid);
+  if(i > -1){
+    orders[i].status = 'cancelled';
+    orders[i].cancelReason = reason;
+    orders[i].cancelledAt = new Date().toISOString();
+    orders[i].cancelledBy = CU.name;
+    LS.set('be_orders', orders);
+    logAct(CU.id, `Canceló pedido #${orders[i].number} — Motivo: ${reason}`);
+    notify('🚫','Pedido cancelado',`Pedido #${orders[i].number} cancelado. Motivo: ${reason}`,5000);
+    selOrder = null;
+    cm('m-cancel-reason');
+    go(CV);
+  }
+}
+
+function editOrder(oid){
+  const orders = LS.get('be_orders');
+  const o = orders.find(x => x.id === oid);
+  if(!o) return;
+  document.getElementById('o-client').value = o.clientName;
+  const gEl = document.getElementById('o-gnote');
+  if(gEl) gEl.value = o.generalNote || '';
+  cart = o.items.map(i => ({...i}));
+  editingOrderId = oid;
+  buildCart();
+  const btn = document.getElementById('btn-send-order');
+  if(btn) btn.innerHTML = '💾 Guardar Cambios';
 }
 
 // ═══════════════════════════════════════════
@@ -649,7 +653,7 @@ function doLogin(){
   const pass=document.getElementById('lp').value;
   const errEl=document.getElementById('lerr');
   const users=LS.get('be_users');
-  const u=users.find(u=>u.name.toLowerCase()===name.toLowerCase()&&u.password===pass&&u.active!==false);
+  const u=users.find(u=>u.name && u.name.toLowerCase()===name.toLowerCase()&&u.password==pass&&u.active!==false);
   if(!u){errEl.style.display='block';return}
   errEl.style.display='none';
   CU=u;LS.set('be_session',{uid:u.id});
@@ -684,14 +688,15 @@ function startApp(){
   document.getElementById('uname').textContent=CU.name;
   document.getElementById('urole').textContent=ROLES[CU.role]||CU.role;
   document.getElementById('tb-chip').textContent=CU.name+' · '+(ROLES[CU.role]||'');
-  
-  // Realizar sincronización inicial desde BD
-  syncData(true).then(() => {
-    go('orders');
-    startClock();
-    setInterval(updBadges,6000);
-    window.addEventListener('storage',e=>{if(e.key&&e.key.startsWith('be_'))updBadges()});
+  // Mostrar solo las vistas permitidas en el sidebar según el rol
+  const allowed=ROLE_VIEWS[CU.role]||['orders'];
+  document.querySelectorAll('.ni[data-v]').forEach(el=>{
+    el.style.display=allowed.includes(el.dataset.v)?'':'none';
   });
+  go(allowed[0]);
+  startClock();
+  setInterval(updBadges,6000);
+  window.addEventListener('storage',e=>{if(e.key&&e.key.startsWith('be_'))updBadges()});
 }
 function startClock(){
   const el=document.getElementById('clock');
@@ -717,6 +722,8 @@ function updBadges(){
 // NAVIGATION
 // ═══════════════════════════════════════════
 function go(v){
+  const allowed=CU?ROLE_VIEWS[CU.role]||['orders']:['orders'];
+  if(!allowed.includes(v)){notify('🚫','Acceso restringido','No tienes permiso para ver esta sección.',3000);v=allowed[0];}
   CV=v;
   document.getElementById('tb-title').textContent=VIEW_T[v]||v;
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.v===v));
@@ -732,7 +739,7 @@ function go(v){
   }
   updBadges();
 }
-function refreshView(){syncData(true); go(CV);notify('✅','Actualizado','Datos refrescados de la base.',2000)}
+function refreshView(){go(CV);notify('✅','Actualizado','Datos refrescados.',2000)}
 function toggleSB(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sb-ov').classList.toggle('open')}
 function closeSB(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-ov').classList.remove('open')}
 
@@ -808,7 +815,7 @@ function rOrders(c){
         <div class="ch"><div class="ct">🛒 Carrito</div><button class="btn bo btn-sm" onclick="clearCart()">🗑️ Limpiar</button></div>
         <div id="cart-items"></div>
         <div class="ctrow"><div style="font-size:13px;font-weight:600;color:var(--muted)">TOTAL</div><div class="ctamt" id="cart-tot">$0.00</div></div>
-        <button id="btn-send-order" class="btn bp" style="width:100%;margin-top:10px;padding:14px;font-size:16px" onclick="sendOrder()">🚀 Enviar a Cocina</button>
+        <button class="btn bp" id="btn-send-order" style="width:100%;margin-top:10px;padding:14px;font-size:16px" onclick="sendOrder()">${editingOrderId ? '💾 Guardar Cambios' : '🚀 Enviar a Cocina'}</button>
       </div>
       <div class="card" style="margin-top:16px">
         <div class="ch"><div class="ct">Mis Pedidos Activos</div></div>
@@ -843,13 +850,13 @@ function addToCart(pid){
 function remFromCart(pid){cart=cart.filter(i=>i.pid!==pid);buildCart()}
 function chgQty(pid,d){const i=cart.find(x=>x.pid===pid);if(i)i.qty=Math.max(1,i.qty+d);buildCart()}
 function clearCart(){
-  cart=[]; buildCart();
-  editingOrderId = null;
-  const btn = document.getElementById('btn-send-order');
-  if(btn) { btn.innerHTML = '🚀 Enviar a Cocina'; btn.className = 'btn bp'; }
-  const cEl=document.getElementById('o-client');
-  const gEl=document.getElementById('o-gnote');
-  if(cEl) cEl.value=''; if(gEl) gEl.value='';
+  cart=[];
+  editingOrderId=null;
+  const btn=document.getElementById('btn-send-order');
+  if(btn)btn.innerHTML='🚀 Enviar a Cocina';
+  const cEl=document.getElementById('o-client'); if(cEl) cEl.value='';
+  const gEl=document.getElementById('o-gnote'); if(gEl) gEl.value='';
+  buildCart();
 }
 function openNote(pid){const i=cart.find(x=>x.pid===pid);if(!i)return;document.getElementById('nte-inp').value=i.note||'';document.getElementById('nte-pid').value=pid;om('m-note')}
 function saveItemNote(){const pid=document.getElementById('nte-pid').value;const i=cart.find(x=>x.pid===pid);if(i)i.note=document.getElementById('nte-inp').value.trim();cm('m-note');buildCart()}
@@ -889,31 +896,13 @@ function buildMyOrders(){
         <span class="badge ${SB[o.status]}">${SL[o.status]}</span>
       </div>
       <div style="font-size:12px;color:var(--muted)">${o.items.length} producto(s) · ${fc(o.total)}</div>
-      <div style="margin-top:8px;display:flex;gap:6px">
-        ${o.status==='bar'?`<button class="btn bpu btn-sm" onclick="markDel('${o.id}')">🍽️ Marcar Entregado</button>`:''}
+      <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+        ${o.status==='bar'?`<button class="btn bpu btn-sm" onclick="markDel('${o.id}')">🍽️ Entregar</button>`:''}
         <button class="btn bo btn-sm" onclick="editOrder('${o.id}')">✏️ Editar</button>
-        <button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
+        <button class="btn bo btn-sm" style="color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
       </div>
     </div>`).join('');
 }
-// Función para cargar los datos de la orden en el carrito para editarla
-function editOrder(oid){
-  const orders = LS.get('be_orders');
-  const o = orders.find(x => x.id === oid);
-  if(!o) return;
-  editingOrderId = oid;
-  cart = o.items.map(i => ({...i}));
-  
-  document.getElementById('o-client').value = o.clientName;
-  const gnote = document.getElementById('o-gnote');
-  if(gnote) gnote.value = o.generalNote || '';
-  
-  buildCart();
-  const btn = document.getElementById('btn-send-order');
-  if(btn) { btn.innerHTML = '🔄 Actualizar Pedido'; btn.className = 'btn bw'; }
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
 function sendOrder(){
   const cEl=document.getElementById('o-client');
   const gEl=document.getElementById('o-gnote');
@@ -926,44 +915,41 @@ function sendOrder(){
   const tot=cart.reduce((s,i)=>s+i.price*i.qty,0);
   const orders=LS.get('be_orders');
   
-  let msg, title, ico;
-
-  if (editingOrderId) {
-    // Modo edición
-    const i = orders.findIndex(x => x.id === editingOrderId);
-    if(i !== -1) {
-      orders[i].items = cart.map(i => ({...i}));
+  if(editingOrderId){
+    const i = orders.findIndex(o => o.id === editingOrderId);
+    if(i !== -1){
       orders[i].clientName = cEl.value.trim();
+      orders[i].items = cart.map(item => ({...item}));
       orders[i].generalNote = gEl ? gEl.value.trim() : '';
       orders[i].total = tot;
-      orders[i].isUpdated = true; // Activa la bandera visual en la vista de cocina
+      if(orders[i].discount) orders[i].discount.finalTotal = tot;
+      orders[i].lastEditAt = new Date().toISOString();
+      orders[i].lastEditBy = CU.name;
       LS.set('be_orders', orders);
-      logAct(CU.id, `Actualizó el pedido #${orders[i].number}`);
-      ico = '🔄'; title = 'Pedido actualizado'; msg = `El pedido #${orders[i].number} ha sido modificado.`;
+      logAct(CU.id, `Editó pedido #${orders[i].number}`);
+      notify('✅','¡Pedido editado!',`Pedido #${orders[i].number} ha sido actualizado.`,4000);
+      notify('⚠️','⚙️ Aviso Cocina & Caja',`El pedido #${orders[i].number} — ${orders[i].clientName} fue modificado por ${CU.name}. Revisa los cambios.`,7000);
     }
     editingOrderId = null;
     const btn = document.getElementById('btn-send-order');
-    if(btn) { btn.innerHTML = '🚀 Enviar a Cocina'; btn.className = 'btn bp'; }
+    if(btn) btn.innerHTML = '🚀 Enviar a Cocina';
   } else {
-    // Modo creación normal
-    const o={id:uid(),number:String(orders.length+1).padStart(4,'0'),clientName:cEl.value.trim(),
+    const o={id:uid(),number:nextNum(),clientName:cEl.value.trim(),
       items:cart.map(i=>({...i})),generalNote:gEl?gEl.value.trim():'',
       workerName:CU.name,workerId:CU.id,status:'pending',total:tot,
       discount:{type:'none',value:0,reason:'',finalTotal:tot},
       payment:{cash:0,card:0,transfer:0,tip:0,status:'pending'},
-      timestamp:new Date().toISOString(),paidAt:null, isUpdated: false};
+      timestamp:new Date().toISOString(),paidAt:null};
     orders.push(o);LS.set('be_orders',orders);
     logAct(CU.id,`Creó pedido #${o.number} - ${o.clientName} - ${fc(tot)}`);
-    ico = '✅'; title = '¡Pedido enviado!'; msg = `Pedido #${o.number} enviado a cocina.`;
+    notify('✅','¡Pedido enviado!',`Pedido #${o.number} enviado a cocina.`,4000);
   }
   
   cart=[];cEl.value='';if(gEl)gEl.value='';
   buildCart();
-  notify(ico, title, msg, 4000);
   const mo=document.getElementById('my-orders');if(mo)mo.innerHTML=buildMyOrders();
   updBadges();
 }
-
 function markDel(oid){
   const orders=LS.get('be_orders');
   const i=orders.findIndex(o=>o.id===oid);if(i===-1)return;
@@ -992,7 +978,6 @@ function rKitchen(c){
     <button class="fpill ${kFilter==='ready'?'active':''}" onclick="kFilter='ready';go('kitchen')">✅ Listos (${cnt.ready})</button>
     <button class="fpill ${kFilter==='bar'?'active':''}" onclick="kFilter='bar';go('kitchen')">🍺 Barra (${cnt.bar})</button>
     <button class="fpill ${kFilter==='all'?'active':''}" onclick="kFilter='all';go('kitchen')">📋 Todos</button>
-    <button class="fpill ${kFilter==='cancelled'?'active':''}" onclick="kFilter='cancelled';go('kitchen')">🚫 Cancelados (${all.filter(o=>o.status==='cancelled').length})</button>
   </div>
   ${!sorted.length?'<div class="card"><div class="empty"><div class="ei">👨‍🍳</div><h3>Sin pedidos</h3><p>No hay pedidos en esta categoría.</p></div></div>':
   `<div class="kgrid">${sorted.map(o=>buildKCard(o)).join('')}</div>`}`;
@@ -1011,48 +996,25 @@ function buildKCard(o){
       <div style="text-align:right"><span class="badge ${SB[o.status]}">${SL[o.status]}</span><div style="font-size:11px;color:var(--muted);margin-top:3px">⏱️ ${el}min</div></div>
     </div>
     <div class="ocb">
-      ${o.isUpdated ? `<div style="background:var(--warn);color:#fff;padding:5px 8px;border-radius:4px;font-size:11px;font-weight:bold;margin-bottom:8px;animation:pulse 2s infinite;">⚠️ PEDIDO MODIFICADO</div>` : ''}
       <ul class="oitems">
         ${o.items.map(i=>`<li><span class="oq">${i.qty}×</span> ${i.name}${i.note?`<div class="inotice">📝 ${i.note}</div>`:''}</li>`).join('')}
       </ul>
       ${o.generalNote?`<div style="margin-top:8px;font-size:12px;background:#FFF5F0;padding:7px 10px;border-radius:6px;color:var(--birria)">📝 ${o.generalNote}</div>`:''}
+      ${o.lastEditAt?`<div style="margin-top:6px;font-size:11px;background:#FEF9C3;padding:5px 8px;border-radius:6px;color:#92400E;font-weight:600">⚙️ Modificado por ${o.lastEditBy}</div>`:''}
+      ${o.cancelReason?`<div style="margin-top:6px;font-size:11px;background:#FEE2E2;padding:5px 8px;border-radius:6px;color:#991B1B;font-weight:600">🚫 Cancelado: ${o.cancelReason}</div>`:''}
       <div class="owrk">👤 ${o.workerName}</div>
     </div>
     <div class="ocf"><div class="sbts">
       ${btns[o.status]||''}
-      ${!['pending','paid','delivered'].includes(o.status)?`<button class="btn bo btn-sm" onclick="updStatus('${o.id}','pending')">⏪ Regresar</button>`:''}
-      ${['delivered','paid'].includes(o.status)?`<span style="font-size:12px;color:var(--muted)">Pedido completado</span>`:''}
-      ${o.status==='cancelled'?`<span style="font-size:12px;color:var(--err);font-weight:700">🚫 Pedido Cancelado</span>`:''}
-      ${!['paid','cancelled','delivered'].includes(o.status)?`<button class="btn bd btn-sm" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>`:''}
+      ${!['pending','paid','delivered','cancelled'].includes(o.status)?`<button class="btn bo btn-sm" onclick="updStatus('${o.id}','pending')">⏪ Regresar</button>`:''}
+      ${['delivered','paid','cancelled'].includes(o.status)?`<span style="font-size:12px;color:var(--muted)">Pedido completado o cancelado</span>`:''}
     </div></div>
   </div>`;
-}
-function cancelOrder(oid){
-  const orders=LS.get('be_orders');
-  const o=orders.find(x=>x.id===oid);
-  if(!o)return;
-  confirm2(`¿Cancelar pedido #${o.number}?`,`"${o.clientName}" — Esta acción no se puede deshacer.`,()=>{
-    const idx=orders.findIndex(x=>x.id===oid);
-    if(idx===-1)return;
-    orders[idx].status='cancelled';
-    orders[idx].cancelledAt=new Date().toISOString();
-    orders[idx].cancelledBy=CU.name;
-    LS.set('be_orders',orders);
-    logAct(CU.id,`Canceló pedido #${o.number} - ${o.clientName}`);
-    notify('🚫','Pedido Cancelado',`#${o.number} – ${o.clientName}`,4000);
-    updBadges();
-    if(['orders','kitchen','cashier'].includes(CV))go(CV);
-  },'Cancelar Pedido','bd');
 }
 function updStatus(oid,ns){
   const orders=LS.get('be_orders');
   const i=orders.findIndex(o=>o.id===oid);if(i===-1)return;
-  const os=orders[i].status;orders[i].status=ns;
-  
-  // Limpiar la advertencia de actualización cuando cocina interactúa
-  if(orders[i].isUpdated) orders[i].isUpdated = false; 
-  
-  LS.set('be_orders',orders);
+  const os=orders[i].status;orders[i].status=ns;LS.set('be_orders',orders);
   logAct(CU.id,`Cambió pedido #${orders[i].number} de "${SL[os]}" a "${SL[ns]}"`);
   if(ns==='bar')notify('🍺',`¡Pedido #${orders[i].number} en Barra!`,`${orders[i].clientName} — listo para entregar.`,6000,'nbar');
   go('kitchen');
@@ -1094,7 +1056,7 @@ function selCsOrder(oid){
   go('cashier');
 }
 function buildPayPanel(){
-  const o=selOrder;if(!o)return'';
+  const o=selOrder;if(!o)return;
   const d=csDisc;
   let da=0,ta=0;
   if(d.type==='pct')da=o.total*(d.value/100);
@@ -1140,6 +1102,7 @@ function buildPayPanel(){
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn bo" onclick="showTicket()">🧾 Ver Ticket</button>
+      <button class="btn bo" style="color:var(--err);border-color:var(--err)" onclick="cancelOrder('${o.id}')">🚫 Cancelar</button>
       <button class="btn bs" style="flex:1" onclick="doPay()">✅ Cobrar</button>
     </div>
   </div>`;
@@ -1224,7 +1187,23 @@ function finalizePay(ft,paid,da,ta){
   orders[i].discount={...d,finalTotal:ft,discAmt:da};
   orders[i].paidAt=new Date().toISOString();
   LS.set('be_orders',orders);
-  // Sales
+  
+  // Guardar en la pestaña de Caja
+  const cajaList = LS.get('be_caja') || [];
+  cajaList.push({
+    id: orders[i].id,
+    number: orders[i].number,
+    clientName: orders[i].clientName,
+    total: ft,
+    cash: csPayments.cash || 0,
+    card: csPayments.card || 0,
+    transfer: csPayments.transfer || 0,
+    workerName: CU.name,
+    timestamp: new Date().toISOString()
+  });
+  LS.set('be_caja', cajaList);
+
+  // Ventas acumuladas
   const addSales=(key)=>{const s=LS.obj(key,{total:0,cash:0,card:0,transfer:0});
     s.total+=ft;s.cash+=csPayments.cash||0;s.card+=csPayments.card||0;s.transfer+=csPayments.transfer||0;
     LS.set(key,s)};
@@ -1293,7 +1272,7 @@ function rProducts(c){
     <div class="pflt">
       <div><label class="fl">Buscar Nombre</label>
         <input type="text" class="fc" id="pf-name" placeholder="Nombre..." value="${pFlt.name}"
-          oninput="pFlt.name=this.value;filterProds()"/></div>
+          oninput="pFlt.name=this.value;debouncedFilterProds()"/></div>
       <div><label class="fl">Filtrar Categoría</label>
         <select class="fc" id="pf-cat" onchange="pFlt.cat=this.value;filterProds()">
           <option value="">Todas</option>
@@ -1329,8 +1308,8 @@ function buildProdRows(prods){
   </tr>`).join('');
 }
 function filterProds(){
-  const nm=(document.getElementById('pf-name')?.value||pFlt.name).toLowerCase();
-  const ct=(document.getElementById('pf-cat')?.value||pFlt.cat).toLowerCase();
+  const nm=($('pf-name')?.value||pFlt.name).toLowerCase();
+  const ct=($('pf-cat')?.value||pFlt.cat).toLowerCase();
   const rows=document.querySelectorAll('#prod-tbody tr');
   let vis=0;
   rows.forEach(r=>{
@@ -1338,9 +1317,10 @@ function filterProds(){
     const show=(!nm||rn.includes(nm))&&(!ct||rc===ct);
     r.style.display=show?'':'none';if(show)vis++;
   });
-  const el=document.getElementById('prod-count');
+  const el=$('prod-count');
   if(el)el.textContent=`${vis} de ${rows.length} producto(s)`;
 }
+const debouncedFilterProds=debounce(filterProds,200);
 function openProd(pid){
   document.getElementById('pe-id').value=pid||'';
   if(pid){
@@ -1474,50 +1454,75 @@ function calcCierre(){
     <div style="margin-top:6px;font-weight:700">${msg}</div>
   </div>`;
   resEl.style.display='block';
-  document.getElementById('btn-corte').style.display='';
+  document.getElementById('btn-corte').style.display='block';
 }
 function doCorte(){
   if(!cierreData)return;
-  const sd=LS.obj('be_sd',{total:0,cash:0,card:0,transfer:0});
-  const cut={id:uid(),timestamp:new Date().toISOString(),workerName:CU.name,workerId:CU.id,
-    initCash:cierreData.ini,salesTotal:sd.total,cash:sd.cash,card:sd.card,transfer:sd.transfer,
-    expectedCash:cierreData.expected,physicalCash:cierreData.fis,diff:cierreData.diff,date:today()};
-  const cuts=LS.get('be_cuts');cuts.push(cut);LS.set('be_cuts',cuts);
-  // Reset daily only
-  LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:cierreData.fis});
-  logAct(CU.id,`Corte de caja. Ventas: ${fc(sd.total)}. Diferencia: ${fc(cierreData.diff)}`);
-  cm('m-cierre');notify('✅','Corte realizado',`Ventas del día: ${fc(sd.total)}`,4000);
-  cierreData=null;go('corte');
-}
-function resetSales(key,label){
-  confirm2(`¿Reiniciar ventas de ${label}?`,`El contador de ${label} volverá a cero. ¿Continuar?`,()=>{
-    if(key==='sw')LS.set('be_sw',{total:0,cash:0,card:0,transfer:0,weekStart:weekStart()});
-    else if(key==='sm')LS.set('be_sm',{total:0,cash:0,card:0,transfer:0,monthStart:monthStart()});
-    logAct(CU.id,`Reinició ventas de ${label}`);
-    notify('✅','Reiniciado',`Contador de ${label} reiniciado.`,3000);go('corte');
-  },'Reiniciar','bw');
-}
-function printCuts(mode){
+  const sd=LS.obj('be_sd');
   const cuts=LS.get('be_cuts');
-  const list=mode==='day'?cuts.filter(c=>c.date===today()):cuts;
-  const w=window.open('','_blank','width=900,height=600');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cortes - Birria Express</title>
-  <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px}h1{font-size:18px}
-  table{width:100%;border-collapse:collapse;margin-top:16px}
-  th{background:#f5f5f5;padding:8px;text-align:left;border:1px solid #ddd}
-  td{padding:7px 8px;border:1px solid #ddd}.ok{color:green}.over{color:orange}.short{color:red}
-  @media print{body{margin:0}}</style></head><body>
-  <h1>🔥 BIRRIA EXPRESS — ${mode==='day'?'Corte del Día ('+today()+')':'Historial de Cortes'}</h1>
-  <div>Generado: ${new Date().toLocaleString('es-MX')}</div>
-  <table><thead><tr><th>Fecha</th><th>Cajero</th><th>C.Inicial</th><th>Ventas</th><th>Efectivo</th><th>Tarjeta</th><th>Transfer.</th><th>Esperado</th><th>Físico</th><th>Diferencia</th></tr></thead>
-  <tbody>${list.slice().reverse().map(c=>`<tr>
-    <td>${fds(c.timestamp)}</td><td>${c.workerName}</td>
-    <td>${fc(c.initCash)}</td><td>${fc(c.salesTotal)}</td>
-    <td>${fc(c.cash)}</td><td>${fc(c.card)}</td><td>${fc(c.transfer)}</td>
-    <td>${fc(c.expectedCash)}</td><td>${fc(c.physicalCash)}</td>
-    <td class="${c.diff===0?'ok':c.diff>0?'over':'short'}">${c.diff>0?'+':''}${fc(c.diff)} ${c.diff===0?'✅':c.diff>0?'⬆️':'⬇️'}</td>
-  </tr>`).join('')}</tbody></table>
-  <script>window.onload=()=>{window.print();window.close()}<\/script></body></html>`);
+  const c={id:uid(),timestamp:new Date().toISOString(),workerName:CU.name,workerId:CU.id,
+    initCash:cierreData.ini,salesTotal:sd.total,cash:sd.cash,card:sd.card,transfer:sd.transfer,
+    expectedCash:cierreData.expected,physicalCash:cierreData.fis,diff:cierreData.diff};
+  cuts.push(c);LS.set('be_cuts',cuts);
+  LS.set('be_sd',{total:0,cash:0,card:0,transfer:0,date:today(),initCash:cierreData.fis});
+  logAct(CU.id,`Realizó corte de caja. Ventas: ${fc(sd.total)} · Diferencia: ${fc(cierreData.diff)}`);
+  cm('m-cierre');
+  notify('✅','Corte realizado',`Corte guardado exitosamente en Google Sheets.`,4000);
+  go('corte');
+}
+
+function resetSales(key, name){
+  confirm2(`¿Reiniciar ventas de ${name}?`, 'Esta acción pondrá en ceros el contador acumulado.', () => {
+    if(key === 'sw') LS.set('be_sw', {total:0, cash:0, card:0, transfer:0, weekStart: weekStart()});
+    if(key === 'sm') LS.set('be_sm', {total:0, cash:0, card:0, transfer:0, monthStart: monthStart()});
+    logAct(CU.id, `Reinició acumulado de ventas de ${name}`);
+    notify('✅', 'Reinicio completado', `Ventas de ${name} puestas a cero.`, 3000);
+    go('corte');
+  });
+}
+
+function printCuts(type){
+  const cuts = LS.get('be_cuts');
+  let list = cuts;
+  if(type === 'day') {
+    const t = today();
+    list = cuts.filter(c => c.timestamp.startsWith(t));
+  }
+  if(!list.length){
+    notify('⚠️', 'Sin registros', 'No hay cortes para imprimir en el rango seleccionado.', 3000);
+    return;
+  }
+  const w = window.open('', '_blank', 'width=800,height=600');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte de Cortes</title>
+  <style>
+    body { font-family:'Inter',sans-serif; padding:20px; color:#1C0A05; }
+    h2 { font-family:'Bebas Neue',sans-serif; letter-spacing:2px; color:#C8400A; margin-bottom:4px; }
+    table { width:100%; border-collapse:collapse; margin-top:15px; font-size:12px; }
+    th { background:#F5EDE4; padding:8px; text-align:left; border-bottom:2px solid #E8D5C4; }
+    td { padding:8px; border-bottom:1px solid #E8D5C4; }
+    @media print { body { padding:0; } }
+  </style></head><body>
+  <h2>🔥 BIRRIA EXPRESS — Reporte de Cortes</h2>
+  <div>Generado el: ${new Date().toLocaleString('es-MX')} · Usuario: ${CU.name}</div>
+  <table>
+    <thead><tr><th>Fecha</th><th>Cajero</th><th>C. Inicial</th><th>Ventas Total</th><th>Efectivo</th><th>Tarjeta</th><th>Transfer.</th><th>Esperado</th><th>Físico</th><th>Diferencia</th></tr></thead>
+    <tbody>
+      ${list.map(ct => `<tr>
+        <td>${fds(ct.timestamp)}</td>
+        <td>${ct.workerName}</td>
+        <td>${fc(ct.initCash)}</td>
+        <td>${fc(ct.salesTotal)}</td>
+        <td>${fc(ct.cash)}</td>
+        <td>${fc(ct.card)}</td>
+        <td>${fc(ct.transfer)}</td>
+        <td>${fc(ct.expectedCash)}</td>
+        <td>${fc(ct.physicalCash)}</td>
+        <td>${fc(ct.diff)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <script>window.onload = () => { window.print(); window.close(); }<\/script>
+  </body></html>`);
   w.document.close();
 }
 
@@ -1525,125 +1530,130 @@ function printCuts(mode){
 // USERS VIEW
 // ═══════════════════════════════════════════
 function rUsers(c){
-  const users=LS.get('be_users');
-  c.innerHTML=`<div class="card">
-    <div class="ch"><div class="ct">👥 Gestión de Usuarios</div>
-      <button class="btn bp" onclick="openUser()">+ Nuevo Usuario</button></div>
-    <div class="tw"><table>
-      <thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Últimas Acciones</th><th>Acciones</th></tr></thead>
-      <tbody>${users.map(u=>`<tr>
-        <td><div style="display:flex;align-items:center;gap:8px">
-          <div style="width:32px;height:32px;background:var(--birria);border-radius:50%;
-            display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;flex-shrink:0">
-            ${u.name.charAt(0).toUpperCase()}</div>
-          <div><strong>${u.name}</strong>${u.id===CU?.id?' <span style="font-size:11px;color:var(--birria)">(Tú)</span>':''}</div>
-        </div></td>
-        <td><span class="badge b-${u.role}">${ROLES[u.role]||u.role}</span></td>
-        <td><span class="badge ${u.active===false?'':'br'}" style="${u.active===false?'background:#F3F4F6;color:#6B7280':''}">
-          ${u.active===false?'Inactivo':'Activo'}</span></td>
-        <td style="font-size:12px;color:var(--muted)">
-          ${(u.history||[]).slice(0,2).map(h=>`<div>${h.action} · <em>${fd(h.timestamp)}</em></div>`).join('')||'—'}
-        </td>
-        <td><div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn bo btn-sm" onclick="viewHist('${u.id}')">📋 Historial</button>
-          <button class="btn bo btn-sm" onclick="openUser('${u.id}')">✏️ Editar</button>
-          <button class="btn btn-sm ${u.active===false?'bs':'bw'}" onclick="togUser('${u.id}')">
-            ${u.active===false?'✅ Activar':'🚫 Desactivar'}</button>
-          ${u.id!==CU?.id?`<button class="btn bd btn-sm" onclick="delUser('${u.id}')">🗑️</button>`:''}
-        </div></td>
-      </tr>`).join('')}</tbody>
-    </table></div>
+  const users = LS.get('be_users');
+  c.innerHTML = `<div class="card">
+    <div class="ch">
+      <div class="ct">👥 Gestión de Usuarios</div>
+      <button class="btn bp" onclick="openUser()">+ Nuevo Usuario</button>
+    </div>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Acciones</th></tr>
+        </thead>
+        <tbody>
+          ${users.map(u => `<tr>
+            <td><strong>${u.name}</strong></td>
+            <td><span class="badge b-${u.role}">${ROLES[u.role]||u.role}</span></td>
+            <td><span class="badge ${u.active===false?'':'br'}" style="${u.active===false?'background:#F3F4F6;color:#6B7280':''}">${u.active===false?'Inactivo':'Activo'}</span></td>
+            <td>${fds(u.createdAt)}</td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn bo btn-sm" onclick="openUser('${u.id}')">✏️ Editar</button>
+                <button class="btn bo btn-sm" onclick="viewUserHist('${u.id}')">📜 Historial</button>
+                ${u.id !== CU.id ? `
+                  <button class="btn btn-sm ${u.active===false?'bs':'bw'}" onclick="togUser('${u.id}')">${u.active===false?'✅ Activar':'🚫 Desactivar'}</button>
+                  <button class="btn bd btn-sm" onclick="delUser('${u.id}')">🗑️</button>
+                ` : '<span style="font-size:11px;color:var(--muted)">(Tú)</span>'}
+              </div>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
   </div>`;
 }
-function openUser(uid_){
-  document.getElementById('ue-id').value=uid_||'';
-  if(uid_){
-    const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
-    document.getElementById('mt-user').textContent='Editar Usuario';
-    document.getElementById('ue-name').value=u.name;
-    document.getElementById('ue-pass').value='';
-    document.getElementById('ue-role').value=u.role;
-  }else{
-    document.getElementById('mt-user').textContent='Nuevo Usuario';
-    ['ue-name','ue-pass'].forEach(id=>document.getElementById(id).value='');
-    document.getElementById('ue-role').value='waiter';
+
+function openUser(uid){
+  document.getElementById('ue-id').value = uid || '';
+  if(uid){
+    const u = LS.get('be_users').find(x => x.id === uid);
+    if(!u) return;
+    document.getElementById('mt-user').textContent = 'Editar Usuario';
+    document.getElementById('ue-name').value = u.name;
+    document.getElementById('ue-pass').value = u.password;
+    document.getElementById('ue-role').value = u.role;
+  } else {
+    document.getElementById('mt-user').textContent = 'Nuevo Usuario';
+    ['ue-name','ue-pass'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('ue-role').value = 'waiter';
   }
   om('m-user');
 }
+
 function saveUser(){
-  const name=document.getElementById('ue-name').value.trim();
-  const pass=document.getElementById('ue-pass').value;
-  const role=document.getElementById('ue-role').value;
-  const eid=document.getElementById('ue-id').value;
-  if(!name||!role){notify('⚠️','Campos requeridos','El nombre y rol son obligatorios.',3000);return}
-  const users=LS.get('be_users');
-  if(eid){
-    const i=users.findIndex(u=>u.id===eid);
-    if(i!==-1){users[i].name=name;users[i].role=role;if(pass)users[i].password=pass;
-      logAct(CU.id,`Editó usuario "${name}"`);}
-  }else{
-    if(!pass){notify('⚠️','Contraseña requerida','Por favor ingresa una contraseña.',3000);return}
-    if(users.find(u=>u.name.toLowerCase()===name.toLowerCase())){
-      notify('⚠️','Usuario existente',`Ya existe un usuario con el nombre "${name}".`,3000);return}
-    users.push({id:uid(),name,password:pass,role,active:true,createdAt:new Date().toISOString(),
-      history:[{action:`Usuario creado por ${CU.name}`,timestamp:new Date().toISOString()}]});
-    logAct(CU.id,`Creó usuario "${name}" (${ROLES[role]})`);
+  const name = document.getElementById('ue-name').value.trim();
+  const pass = document.getElementById('ue-pass').value.trim();
+  const role = document.getElementById('ue-role').value;
+  const eid = document.getElementById('ue-id').value;
+
+  if(!name || !pass){
+    notify('⚠️', 'Campos requeridos', 'Nombre y contraseña son obligatorios.', 3000);
+    return;
   }
-  LS.set('be_users',users);cm('m-user');
-  notify('✅',eid?'Usuario actualizado':'Usuario creado',name,3000);go('users');
+
+  const users = LS.get('be_users');
+  if(eid){
+    const i = users.findIndex(u => u.id === eid);
+    if(i !== -1){
+      users[i] = {...users[i], name, password: pass, role};
+      logAct(CU.id, `Editó al usuario "${name}"`);
+    }
+  } else {
+    users.push({
+      id: uid(),
+      name,
+      password: pass,
+      role,
+      active: true,
+      createdAt: new Date().toISOString(),
+      history: [{action: 'Usuario creado', timestamp: new Date().toISOString()}]
+    });
+    logAct(CU.id, `Creó usuario "${name}" con rol ${ROLES[role]||role}`);
+  }
+
+  LS.set('be_users', users);
+  cm('m-user');
+  notify('✅', eid ? 'Usuario actualizado' : 'Usuario creado', name, 3000);
+  go('users');
 }
-function togUser(uid_){
-  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes desactivar tu propio usuario.',3000);return}
-  const users=LS.get('be_users');const i=users.findIndex(u=>u.id===uid_);if(i===-1)return;
-  users[i].active=users[i].active===false?true:false;LS.set('be_users',users);
-  logAct(CU.id,`${users[i].active?'Activó':'Desactivó'} usuario "${users[i].name}"`);go('users');
+
+function togUser(uid){
+  const users = LS.get('be_users');
+  const i = users.findIndex(u => u.id === uid);
+  if(i === -1) return;
+  users[i].active = users[i].active === false ? true : false;
+  LS.set('be_users', users);
+  logAct(CU.id, `${users[i].active ? 'Activó' : 'Desactivó'} al usuario "${users[i].name}"`);
+  go('users');
 }
-function delUser(uid_){
-  if(uid_===CU?.id){notify('⚠️','No permitido','No puedes eliminar tu propio usuario.',3000);return}
-  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
-  confirm2(`¿Eliminar a "${u.name}"?`,'Esta acción no se puede deshacer.',()=>{
-    LS.set('be_users',LS.get('be_users').filter(x=>x.id!==uid_));
-    logAct(CU.id,`Eliminó usuario "${u.name}"`);
-    notify('✅','Usuario eliminado',u.name,3000);go('users');
+
+function delUser(uid){
+  const u = LS.get('be_users').find(x => x.id === uid);
+  if(!u) return;
+  confirm2(`¿Eliminar al usuario "${u.name}"?`, 'Esta acción no se puede deshacer.', () => {
+    LS.set('be_users', LS.get('be_users').filter(x => x.id !== uid));
+    logAct(CU.id, `Eliminó usuario "${u.name}"`);
+    notify('✅', 'Usuario eliminado', u.name, 3000);
+    go('users');
   });
 }
-function viewHist(uid_){
-  const u=LS.get('be_users').find(x=>x.id===uid_);if(!u)return;
-  document.getElementById('mt-hist').textContent=`📋 Historial de ${u.name}`;
-  const h=u.history||[];
-  document.getElementById('mb-hist').innerHTML=`
-    <div style="margin-bottom:12px"><span class="badge b-${u.role}">${ROLES[u.role]}</span>
-      <span style="font-size:12px;color:var(--muted);margin-left:8px">${h.length} acciones registradas</span></div>
-    ${!h.length?'<div class="empty"><p>Sin historial de acciones.</p></div>':
-    `<div class="scrl" style="max-height:460px">${h.map(x=>`
-      <div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
-        <div style="width:8px;height:8px;border-radius:50%;background:var(--birria);flex-shrink:0;margin-top:5px"></div>
-        <div><div style="font-size:13px;font-weight:500">${x.action}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${fd(x.timestamp)}</div></div>
-      </div>`).join('')}</div>`}`;
+
+function viewUserHist(uid){
+  const u = LS.get('be_users').find(x => x.id === uid);
+  if(!u) return;
+  document.getElementById('mt-hist').textContent = `Historial de ${u.name}`;
+  const hist = u.history || [];
+  document.getElementById('mb-hist').innerHTML = !hist.length ? 
+    '<div class="empty"><p>Sin actividad registrada</p></div>' :
+    `<ul style="list-style:none;display:flex;flex-direction:column;gap:10px">
+      ${hist.map(h => `<li style="border-bottom:1px solid var(--border);padding-bottom:8px">
+        <div style="font-size:13px;font-weight:600">${h.action}</div>
+        <div style="font-size:11px;color:var(--muted)">${fd(h.timestamp)}</div>
+      </li>`).join('')}
+    </ul>`;
   om('m-hist');
 }
-
-// ═══════════════════════════════════════════
-// KEYBOARD + INIT
-// ═══════════════════════════════════════════
-document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){
-    document.querySelectorAll('.mov.open').forEach(m=>{m.style.display='none';m.classList.remove('open')});
-    document.getElementById('m-confirm').classList.remove('open');
-  }
-});
-
-// Arranque: initData es async, esperamos antes de restaurar sesión
-startClock();
-initData().then(() => {
-  // Auto-restore session tras cargar datos
-  const sess=LS.obj('be_session',null);
-  if(sess?.uid){
-    const u=LS.get('be_users').find(x=>x.id===sess.uid&&x.active!==false);
-    if(u){CU=u;startApp();}
-  }
-});
 </script>
 </body>
 </html>
